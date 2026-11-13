@@ -297,3 +297,15 @@ def test_schedule_history_shows_changes_and_automatic_runs(client):
     assert '自動取得: 完了' in page and '要約: 3 件' in page
     assert 'フィードから取得: 10 件' in page
     assert '手動のみ' not in page
+
+
+@pytest.mark.parametrize('status', ['queued', 'running', 'stopping'])
+def test_automatic_run_disables_manual_button(client, status):
+    client.get('/feeds')
+    with sqlite3.connect(browser.DB_PATH) as connection:
+        connection.execute("INSERT INTO runs(status, origin) VALUES (?, 'automatic')", (status,))
+    page = client.get('/feeds?tab=feeds').text
+    assert 'disabled>自動取得中</button>' in page
+    with sqlite3.connect(browser.DB_PATH) as connection:
+        connection.execute("UPDATE runs SET status = 'completed'")
+    assert '>すぐに実行</button>' in client.get('/feeds?tab=feeds').text

@@ -80,7 +80,7 @@ def fetch_feed_title(url: str) -> str:
 def feeds() -> str:
     with init_db(DB_PATH) as connection:
         feeds = connection.execute("SELECT id, url, title, article_limit FROM feeds ORDER BY id").fetchall()
-        run = connection.execute("SELECT id, status, message FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+        run = connection.execute("SELECT id, status, message, origin FROM runs ORDER BY id DESC LIMIT 1").fetchone()
         logs = connection.execute("SELECT line FROM run_logs WHERE run_id = ? ORDER BY id", (run[0],)).fetchall() if run else []
         selected_timezone = configured_timezone(connection)
         database_mb = DB_PATH.stat().st_size / 1_000_000

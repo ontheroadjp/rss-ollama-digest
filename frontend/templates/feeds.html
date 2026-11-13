@@ -68,7 +68,8 @@
   </div>
   {% else %}<p class="message">フィードは登録されていません。</p>{% endfor %}
   <h2>記事の取得と要約</h2>
-  <form id="run-form" action="{{ url_for('stop_run', run_id=run[0]) if run and run[1] in ('queued', 'running', 'stopping') else url_for('start_run') }}" method="post"><button id="run-button" type="submit" {% if run and run[1] in ('queued', 'running', 'stopping') %}class="stop-button"{% endif %} {% if run and run[1] == 'stopping' %}disabled{% endif %}>{{ '中止中' if run and run[1] == 'stopping' else '中止' if run and run[1] in ('queued', 'running') else 'すぐに実行' }}</button></form>
+  {% set automatic_active = run and run[3] == 'automatic' and run[1] in ('queued', 'running', 'stopping') %}
+  <form id="run-form" action="{{ url_for('stop_run', run_id=run[0]) if run and run[1] in ('queued', 'running', 'stopping') and not automatic_active else url_for('start_run') }}" method="post"><button id="run-button" type="submit" {% if run and run[1] in ('queued', 'running', 'stopping') and not automatic_active %}class="stop-button"{% endif %} {% if automatic_active or (run and run[1] == 'stopping') %}disabled{% endif %}>{{ '自動取得中' if automatic_active else '中止中' if run and run[1] == 'stopping' else '中止' if run and run[1] in ('queued', 'running') else 'すぐに実行' }}</button></form>
   {% if run %}<p id="run-status" role="status" data-active="{{ 'true' if run[1] in ('queued', 'running', 'stopping') else 'false' }}">{% if run[1] == 'queued' %}開始待ち{% elif run[1] == 'running' %}実行中{% elif run[1] == 'stopping' %}中止中{% elif run[1] == 'stopped' %}中止{% elif run[1] == 'completed' %}完了{% else %}エラー{% endif %} {{ run[2] }}</p>
   <h3>実行ログ</h3><pre id="run-log" class="run-log">{% for (line,) in logs %}{{ line }}
 {% else %}ログはまだありません。{% endfor %}</pre>{% endif %}
@@ -100,9 +101,20 @@
         } catch (error) {
           console.error('実行状況を更新できませんでした', error);
         }
-        if (status.dataset.active === 'true') setTimeout(refresh, 5000);
+        setTimeout(refresh, 5000);
       };
-      if (status.dataset.active === 'true') setTimeout(refresh, 5000);
+      setTimeout(refresh, 5000);
+    } else {
+      setInterval(async () => {
+        try {
+          const response = await fetch({{ url_for('feeds', tab='feeds')|tojson }}, { cache: 'no-store' });
+          if (!response.ok) return;
+          const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+          if (page.getElementById('run-status')) window.location.reload();
+        } catch (error) {
+          console.error('実行状況を更新できませんでした', error);
+        }
+      }, 5000);
     }
   </script>
   {% endif %}
