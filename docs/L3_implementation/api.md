@@ -1,6 +1,7 @@
 # Web エンドポイント
 
-- `GET /`: 設定されたタイムゾーンで記事日時を表示し、`q`、`feed`、`page` で検索、フィード選択、ページ移動を行います（`frontend/app.py:161-199`）。
+- `GET /`: 設定されたタイムゾーンで記事日時を表示し、`q`、`feed`、`tag`、`status`、`page` で検索、絞り込み、ページ移動を行います（`frontend/app.py:169-227`）。
+- `POST /articles/<id>/read`: `is_read` に 1、2、3 を指定して記事状態を保存します。JSON を要求した場合は結果を返します（`frontend/app.py:230-240`）。
 - `GET /feeds`: 管理画面。`tab=basic` で基本設定、それ以外はフィード設定と実行状態を表示します（`frontend/app.py:78-86`）。
 - `POST /settings/timezone`: 有効なタイムゾーンを保存します（`frontend/app.py:89-98`）。
 - `POST /feeds`: URL を取得・検証し、フィードタイトルと共に登録します（`frontend/app.py:61-75,101-119`）。
