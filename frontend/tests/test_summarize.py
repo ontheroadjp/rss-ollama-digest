@@ -137,9 +137,14 @@ def test_existing_articles_are_linked_to_feed_without_resummarizing(tmp_path, mo
 def test_body_guid_tags_and_guid_lookup(tmp_path):
     with init_db(tmp_path / 'articles.db') as connection:
         summarize.save_article_to_db(connection, 'url', 'Title', 'Summary', 'model', '', 'feed', 'Feed', body='全文', guid='guid', tags=['技術'])
-        assert connection.execute('SELECT body, guid, tags FROM articles').fetchone() == ('全文', 'guid', '["技術"]')
+        assert connection.execute('SELECT body, guid FROM articles').fetchone() == ('全文', 'guid')
+        assert connection.execute('SELECT name FROM tags JOIN article_tags ON tags.id = article_tags.tag_id').fetchall() == [('技術',)]
         assert summarize.is_already_processed(connection, 'changed-url', 'feed', 'guid')
         assert not summarize.is_already_processed(connection, 'changed-url', 'other-feed', 'guid')
+        connection.execute('UPDATE articles SET is_read = 1')
+        summarize.save_article_to_db(connection, 'url', 'Title', 'Summary', 'model', '', 'feed', 'Feed', overwrite=True, tags=['新タグ'])
+        assert connection.execute('SELECT is_read FROM articles').fetchone() == (1,)
+        assert connection.execute('SELECT name FROM tags JOIN article_tags ON tags.id = article_tags.tag_id').fetchall() == [('新タグ',)]
 
 
 def test_stop_requested_before_worker_starts(tmp_path, monkeypatch):

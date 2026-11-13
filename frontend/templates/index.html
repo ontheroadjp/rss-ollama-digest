@@ -17,28 +17,113 @@
         <option value="">すべてのフィード</option>
         {% for feed in feeds %}<option value="{{ feed.id }}" {% if feed_id == feed.id|string %}selected{% endif %}>{{ feed.title or feed.url }}</option>{% endfor %}
       </select>
-      <button type="submit">表示</button>
+      <noscript><button type="submit">表示</button></noscript>
+      <label class="sr-only" for="status">記事の状態</label><select id="status" name="status">{% for value, label in [("all", "すべて"), ("0", "未読"), ("2", "興味ありのみ"), ("3", "読んだ"), ("1", "興味なしのみ")] %}<option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      {% if tag_id %}<input type="hidden" name="tag" value="{{ tag_id }}">{% endif %}
     </form>
+    <div id="results">
     {% if error %}
       <p class="message" role="alert">データベースを読み込めません。summaries.db とアクセス権を確認してください。</p>
     {% else %}
-      <p class="count">{{ total }} 件の記事{% if query %} · 「{{ query }}」の検索結果{% endif %}</p>
+      <div class="tag-list" aria-label="タグ一覧">{% if tag_id %}<a href="{{ url_for('index', q=query, feed=feed_id, status=status) }}">すべてのタグ</a>{% endif %}{% for tag in tags %}<a data-tag-id="{{ tag.id }}" data-count="{{ tag.count }}" data-name="{{ tag.name }}" href="{{ url_for('index', q=query, feed=feed_id, status=status, tag=tag.id) }}" {% if tag_id == tag.id|string %}aria-current="true"{% endif %}>{{ tag.name }} ({{ tag.count }})</a>{% endfor %}</div>
+      <p class="count"><span id="article-count" data-count="{{ total }}">{{ total }} 件の記事</span>{% if query %} · 「{{ query }}」の検索結果{% endif %}</p>
       {% for article in articles %}
       <article>
         <div class="meta"><span>{{ article.published_at or '公開日時なし' }}</span><span>{{ article.model }}</span></div>
         <h2>{% if article.safe_url %}<a href="{{ article.safe_url }}" target="_blank" rel="noopener noreferrer">{{ article.title }} ↗</a>{% else %}{{ article.title }}{% endif %}</h2>
         <p class="feed-name">{{ article.source_title or 'フィード不明' }}</p>
-        {% if article.tags %}<p class="tags">{% for tag in article.tags %}<span>{{ tag }}</span> {% endfor %}</p>{% endif %}
         <p class="summary">{{ article.summary }}</p>
         <p class="saved">保存日時 {{ article.created_at }}</p>
+        {% if article.tags %}<p class="tags">{% for tag in article.tags %}<a data-tag-id="{{ tag.id }}" href="{{ url_for('index', q=query, feed=feed_id, status=status, tag=tag.id) }}">{{ tag.name }}</a> {% endfor %}</p>{% endif %}
+        <form class="read-form" method="post" action="{{ url_for('update_read_status', article_id=article.id) }}">
+          <input type="hidden" name="q" value="{{ query }}"><input type="hidden" name="feed" value="{{ feed_id }}"><input type="hidden" name="tag" value="{{ tag_id }}"><input type="hidden" name="status" value="{{ status }}"><input type="hidden" name="page" value="{{ page }}">
+          <button type="submit" name="is_read" value="1" {% if article.is_read == 1 %}aria-pressed="true"{% endif %}>興味なし</button><button type="submit" name="is_read" value="3" {% if article.is_read == 3 %}aria-pressed="true"{% endif %}>既読</button><button type="submit" name="is_read" value="2" {% if article.is_read == 2 %}aria-pressed="true"{% endif %}>興味あり</button>
+        </form>
       </article>
       {% else %}<p class="message">{% if total %}このページに記事はありません。{% elif query or feed_id %}一致する記事はありません。{% else %}記事はまだ保存されていません。{% endif %}</p>{% endfor %}
       <nav aria-label="ページ移動">
-        {% if page > 1 %}<a href="{{ url_for('index', q=query, feed=feed_id, page=page-1) }}">← 前へ</a>{% endif %}
+        {% if page > 1 %}<a href="{{ url_for('index', q=query, feed=feed_id, tag=tag_id, status=status, page=page-1) }}">← 前へ</a>{% endif %}
         <span>{{ page }} ページ</span>
-        {% if page * page_size < total %}<a href="{{ url_for('index', q=query, feed=feed_id, page=page+1) }}">次へ →</a>{% endif %}
+        {% if page * page_size < total %}<a href="{{ url_for('index', q=query, feed=feed_id, tag=tag_id, status=status, page=page+1) }}">次へ →</a>{% endif %}
       </nav>
     {% endif %}
+    </div>
   </main>
+  <script>
+    const searchForm = document.querySelector('form[role="search"]');
+    const searchInput = document.getElementById('q');
+    let searchTimer;
+    let filterRequest;
+    async function updateResults() {
+      if (filterRequest) filterRequest.abort();
+      const controller = new AbortController();
+      filterRequest = controller;
+      const url = new URL(searchForm.action);
+      url.search = new URLSearchParams(new FormData(searchForm)).toString();
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error('search failed');
+        const html = await response.text();
+        if (filterRequest !== controller) return;
+        const page = new DOMParser().parseFromString(html, 'text/html');
+        document.getElementById('results').innerHTML = page.getElementById('results').innerHTML;
+        history.replaceState(null, '', url);
+      } catch (error) {
+        if (error.name !== 'AbortError') alert('記事を読み込めませんでした。もう一度お試しください。');
+      }
+    }
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      if (filterRequest) filterRequest.abort();
+      searchTimer = setTimeout(updateResults, 350);
+    });
+    document.getElementById('feed').addEventListener('change', () => {
+      clearTimeout(searchTimer);
+      const tag = searchForm.querySelector('input[name="tag"]');
+      if (tag) tag.remove();
+      updateResults();
+    });
+    searchForm.querySelector('select[name="status"]').addEventListener('change', () => { clearTimeout(searchTimer); updateResults(); });
+    searchForm.addEventListener('submit', event => { event.preventDefault(); clearTimeout(searchTimer); updateResults(); });
+    document.addEventListener('submit', async event => {
+        const form = event.target;
+        if (!form.matches('.read-form')) return;
+        event.preventDefault();
+        const button = event.submitter;
+        const buttons = form.querySelectorAll('button');
+        buttons.forEach(item => item.disabled = true);
+        try {
+          const data = new FormData(form);
+          data.set('is_read', button.value);
+          const response = await fetch(form.action, { method: 'POST', body: data, headers: { Accept: 'application/json' } });
+          if (!response.ok) throw new Error('save failed');
+          if (form.elements.status.value !== 'all' && form.elements.status.value !== button.value) {
+            const article = form.closest('article');
+            const height = article.getBoundingClientRect().height + parseFloat(getComputedStyle(article).marginBottom);
+            const above = article.getBoundingClientRect().bottom <= 0;
+            const count = document.getElementById('article-count');
+            count.dataset.count = Math.max(0, Number(count.dataset.count) - 1);
+            count.textContent = `${count.dataset.count} 件の記事`;
+            article.querySelectorAll('.tags [data-tag-id]').forEach(tag => {
+              const item = document.querySelector(`.tag-list [data-tag-id="${tag.dataset.tagId}"]`);
+              if (!item) return;
+              item.dataset.count = Number(item.dataset.count) - 1;
+              if (Number(item.dataset.count) === 0 && !item.hasAttribute('aria-current')) item.remove();
+              else item.textContent = `${item.dataset.name} (${item.dataset.count})`;
+            });
+            const list = document.querySelector('.tag-list');
+            [...list.querySelectorAll('[data-tag-id]')].sort((a, b) => Number(b.dataset.count) - Number(a.dataset.count) || a.dataset.name.localeCompare(b.dataset.name)).forEach(item => list.append(item));
+            article.remove();
+            if (above) window.scrollBy(0, -height);
+          } else {
+            buttons.forEach(item => item.setAttribute('aria-pressed', item === button ? 'true' : 'false'));
+          }
+        } catch (error) {
+          alert('記事の状態を保存できませんでした。もう一度お試しください。');
+        } finally {
+          buttons.forEach(item => item.disabled = false);
+        }
+    });
+  </script>
 </body>
 </html>

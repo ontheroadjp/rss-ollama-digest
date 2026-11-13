@@ -48,8 +48,8 @@ def save_article_to_db(conn, url, title, summary, model, published_at, feed_url,
     if overwrite:
         conn.execute(
             """
-            INSERT INTO articles (url, title, summary, model, published_at, created_at, feed_url, feed_title, body, guid, tags)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO articles (url, title, summary, model, published_at, created_at, feed_url, feed_title, body, guid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(url) DO UPDATE SET
                 title = excluded.title,
                 summary = excluded.summary,
@@ -58,18 +58,26 @@ def save_article_to_db(conn, url, title, summary, model, published_at, feed_url,
                 created_at = excluded.created_at,
                 feed_url = excluded.feed_url,
                 feed_title = excluded.feed_title,
-                body = excluded.body, guid = excluded.guid, tags = excluded.tags
+                body = excluded.body, guid = excluded.guid
             """,
-            (url, title, summary, model, published_at, created_at, feed_url, feed_title, body, guid, json.dumps(tags or [], ensure_ascii=False)),
+            (url, title, summary, model, published_at, created_at, feed_url, feed_title, body, guid),
         )
     else:
-        conn.execute(
+        cursor = conn.execute(
             """
-            INSERT OR IGNORE INTO articles (url, title, summary, model, published_at, created_at, feed_url, feed_title, body, guid, tags)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO articles (url, title, summary, model, published_at, created_at, feed_url, feed_title, body, guid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (url, title, summary, model, published_at, created_at, feed_url, feed_title, body, guid, json.dumps(tags or [], ensure_ascii=False)),
+            (url, title, summary, model, published_at, created_at, feed_url, feed_title, body, guid),
         )
+        if cursor.rowcount == 0:
+            conn.commit()
+            return
+    article_id = conn.execute("SELECT id FROM articles WHERE url = ?", (url,)).fetchone()[0]
+    conn.execute("DELETE FROM article_tags WHERE article_id = ?", (article_id,))
+    for tag in tags or []:
+        conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
+        conn.execute("INSERT OR IGNORE INTO article_tags (article_id, tag_id) SELECT ?, id FROM tags WHERE name = ?", (article_id, tag))
     conn.commit()
 
 

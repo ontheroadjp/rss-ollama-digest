@@ -1,6 +1,7 @@
 """Shared SQLite initialization for the summarizer and the web interface."""
 
 import sqlite3
+import json
 from pathlib import Path
 
 def init_db(path: str | Path) -> sqlite3.Connection:
@@ -15,9 +16,22 @@ def init_db(path: str | Path) -> sqlite3.Connection:
         conn.execute("ALTER TABLE articles ADD COLUMN feed_url TEXT")
     if "feed_title" not in article_columns:
         conn.execute("ALTER TABLE articles ADD COLUMN feed_title TEXT")
-    for column in ("body", "guid", "tags"):
+    for column in ("body", "guid"):
         if column not in article_columns:
             conn.execute(f"ALTER TABLE articles ADD COLUMN {column} TEXT")
+    if "is_read" not in article_columns:
+        conn.execute("ALTER TABLE articles ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0")
+    conn.execute("CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)")
+    conn.execute("CREATE TABLE IF NOT EXISTS article_tags (article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, tag_id INTEGER NOT NULL REFERENCES tags(id), PRIMARY KEY (article_id, tag_id))")
+    if "tags" in article_columns:
+        for article_id, raw_tags in conn.execute("SELECT id, tags FROM articles WHERE tags IS NOT NULL").fetchall():
+            tags = json.loads(raw_tags)
+            if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+                raise ValueError(f"Invalid tags for article {article_id}")
+            for tag in tags:
+                conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
+                conn.execute("INSERT OR IGNORE INTO article_tags (article_id, tag_id) SELECT ?, id FROM tags WHERE name = ?", (article_id, tag))
+        conn.execute("ALTER TABLE articles DROP COLUMN tags")
     conn.execute("CREATE TABLE IF NOT EXISTS feeds (id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE)")
     conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(feeds)")}
