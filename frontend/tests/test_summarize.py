@@ -3,7 +3,15 @@ import sys
 from types import SimpleNamespace
 
 import summarize
+import pytest
 from database import init_db
+
+real_generate_tags = summarize.generate_tags
+
+
+@pytest.fixture(autouse=True)
+def mock_tags(monkeypatch):
+    monkeypatch.setattr(summarize, 'generate_tags', lambda title, summary: ['技術'])
 
 
 def test_existing_database_migrates_once(tmp_path):
@@ -124,3 +132,61 @@ def test_existing_articles_are_linked_to_feed_without_resummarizing(tmp_path, mo
     summarize.main()
     with sqlite3.connect(path) as connection:
         assert connection.execute('SELECT summary, feed_url, feed_title FROM articles').fetchone() == ('saved', 'https://example.com/rss', 'Source')
+
+
+def test_body_guid_tags_and_guid_lookup(tmp_path):
+    with init_db(tmp_path / 'articles.db') as connection:
+        summarize.save_article_to_db(connection, 'url', 'Title', 'Summary', 'model', '', 'feed', 'Feed', body='全文', guid='guid', tags=['技術'])
+        assert connection.execute('SELECT body, guid, tags FROM articles').fetchone() == ('全文', 'guid', '["技術"]')
+        assert summarize.is_already_processed(connection, 'changed-url', 'feed', 'guid')
+        assert not summarize.is_already_processed(connection, 'changed-url', 'other-feed', 'guid')
+
+
+def test_stop_requested_before_worker_starts(tmp_path, monkeypatch):
+    path = tmp_path / 'articles.db'
+    with init_db(path) as connection:
+        connection.execute("INSERT INTO feeds(url) VALUES ('feed')")
+        run_id = connection.execute("INSERT INTO runs(status) VALUES ('stopping')").lastrowid
+    monkeypatch.setattr(summarize, 'DB_PATH', str(path))
+    monkeypatch.setattr(sys, 'argv', ['summarize.py', '--run-id', str(run_id)])
+    monkeypatch.setattr(summarize.feedparser, 'parse', lambda url: pytest.fail('stopped run fetched feed'))
+    summarize.main()
+    monkeypatch.setattr(summarize, 'RUN_ID', None)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute('SELECT status FROM runs').fetchone()[0] == 'stopped'
+
+
+def test_tags_are_deduplicated_and_limited(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {'response': '{"tags": ["技術", "技術", "AI", "科学", "経済"]}'}
+
+    monkeypatch.setattr(summarize.requests, 'post', lambda *args, **kwargs: Response())
+    assert real_generate_tags('title', 'summary') == ['技術', 'AI', '科学']
+
+
+def test_stop_during_summary_leaves_article_for_next_run(tmp_path, monkeypatch):
+    path = tmp_path / 'articles.db'
+    with init_db(path) as connection:
+        connection.execute("INSERT INTO feeds(url) VALUES ('feed')")
+        run_id = connection.execute("INSERT INTO runs(status) VALUES ('queued')").lastrowid
+    monkeypatch.setattr(summarize, 'DB_PATH', str(path))
+    monkeypatch.setattr(sys, 'argv', ['summarize.py', '--run-id', str(run_id)])
+    monkeypatch.setattr(summarize.feedparser, 'parse', lambda url: SimpleNamespace(feed={}, entries=[{'link': 'article'}], get=lambda key: False))
+    monkeypatch.setattr(summarize.trafilatura, 'fetch_url', lambda url: 'html')
+    monkeypatch.setattr(summarize.trafilatura, 'extract', lambda *args, **kwargs: 'x' * 201)
+
+    def stop_during_summary(title, body):
+        with sqlite3.connect(path) as connection:
+            connection.execute("UPDATE runs SET status = 'stopping' WHERE id = ?", (run_id,))
+        return 'summary'
+
+    monkeypatch.setattr(summarize, 'summarize_text', stop_during_summary)
+    summarize.main()
+    monkeypatch.setattr(summarize, 'RUN_ID', None)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute('SELECT count(*) FROM articles').fetchone()[0] == 0
+        assert connection.execute('SELECT status FROM runs').fetchone()[0] == 'stopped'

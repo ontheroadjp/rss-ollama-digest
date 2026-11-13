@@ -15,6 +15,9 @@ def init_db(path: str | Path) -> sqlite3.Connection:
         conn.execute("ALTER TABLE articles ADD COLUMN feed_url TEXT")
     if "feed_title" not in article_columns:
         conn.execute("ALTER TABLE articles ADD COLUMN feed_title TEXT")
+    for column in ("body", "guid", "tags"):
+        if column not in article_columns:
+            conn.execute(f"ALTER TABLE articles ADD COLUMN {column} TEXT")
     conn.execute("CREATE TABLE IF NOT EXISTS feeds (id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE)")
     conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(feeds)")}
@@ -25,7 +28,8 @@ def init_db(path: str | Path) -> sqlite3.Connection:
     conn.execute("""CREATE TABLE IF NOT EXISTS runs (
         id INTEGER PRIMARY KEY, status TEXT NOT NULL, message TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
-    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_active_run ON runs ((1)) WHERE status IN ('queued', 'running')")
+    conn.execute("DROP INDEX IF EXISTS one_active_run")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_v2 ON runs ((1)) WHERE status IN ('queued', 'running', 'stopping')")
     conn.execute("""CREATE TABLE IF NOT EXISTS run_logs (
         id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, line TEXT NOT NULL,
         FOREIGN KEY (run_id) REFERENCES runs(id))""")

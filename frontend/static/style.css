@@ -23,6 +23,8 @@ input { flex: 1; }
 select { max-width: 45%; }
 @media (max-width: 600px) { form[role="search"] { flex-wrap: wrap; } form[role="search"] input { flex-basis: 100%; } form[role="search"] select { max-width: none; flex: 1; } }
 button { border: 0; background: #245b49; color: white; cursor: pointer; }
+.stop-button { background: #a52e32; }
+.tags span { display: inline-block; background: #e5eee7; border-radius: 1rem; padding: .2rem .7rem; font-size: .85rem; }
 .count { margin: 28px 0 12px; font-size: .9rem; }
 article, .message { background: white; border: 1px solid #dce6de; border-radius: 12px; padding: 24px; margin: 12px 0; }
 .meta { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: .8rem; color: #668477; }

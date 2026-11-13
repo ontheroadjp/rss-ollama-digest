@@ -1,4 +1,5 @@
 import logging
+import json
 import os
 import sqlite3
 import subprocess
@@ -82,8 +83,9 @@ def feeds() -> str:
         run = connection.execute("SELECT id, status, message FROM runs ORDER BY id DESC LIMIT 1").fetchone()
         logs = connection.execute("SELECT line FROM run_logs WHERE run_id = ? ORDER BY id", (run[0],)).fetchall() if run else []
         selected_timezone = configured_timezone(connection)
+        database_mb = DB_PATH.stat().st_size / 1_000_000
     tab = "basic" if request.args.get("tab") == "basic" else "feeds"
-    return render_template("feeds.html", feeds=feeds, run=run, logs=logs, error=request.args.get("error"), tab=tab, selected_timezone=selected_timezone, timezones=sorted(available_timezones()))
+    return render_template("feeds.html", feeds=feeds, run=run, logs=logs, error=request.args.get("error"), tab=tab, selected_timezone=selected_timezone, timezones=sorted(available_timezones()), database_mb=database_mb)
 
 
 @app.post("/settings/timezone")
@@ -158,6 +160,13 @@ def start_run():
     return redirect(url_for("feeds"))
 
 
+@app.post("/runs/<int:run_id>/stop")
+def stop_run(run_id: int):
+    with init_db(DB_PATH) as connection:
+        connection.execute("UPDATE runs SET status = 'stopping' WHERE id = ? AND status IN ('queued', 'running')", (run_id,))
+    return redirect(url_for("feeds"))
+
+
 @app.get("/")
 def index() -> tuple[str, int] | str:
     query = request.args.get("q", "").strip()
@@ -183,7 +192,7 @@ def index() -> tuple[str, int] | str:
                 f"SELECT COUNT(*) FROM articles a WHERE {condition}", params
             ).fetchone()[0]
             rows = connection.execute(
-                f"""SELECT a.title, a.url, a.summary, a.model, a.published_at, a.created_at,
+                f"""SELECT a.title, a.url, a.summary, a.model, a.published_at, a.created_at, a.tags,
                            COALESCE(NULLIF(f.title, ''), a.feed_title, a.feed_url) AS source_title
                     FROM articles a LEFT JOIN feeds f ON f.url = a.feed_url
                     WHERE {condition}
@@ -195,5 +204,5 @@ def index() -> tuple[str, int] | str:
         logging.exception("Could not read article database")
         return render_template("index.html", error=True, query=query, feed_id=feed_id, feeds=[], articles=[], page=page, total=0, page_size=PAGE_SIZE), 503
 
-    articles = [{**dict(row), "safe_url": safe_url(row["url"]), "published_at": display_timestamp(row["published_at"], zone), "created_at": display_timestamp(row["created_at"], zone)} for row in rows]
+    articles = [{**dict(row), "tags": json.loads(row["tags"] or "[]"), "safe_url": safe_url(row["url"]), "published_at": display_timestamp(row["published_at"], zone), "created_at": display_timestamp(row["created_at"], zone)} for row in rows]
     return render_template("index.html", error=False, query=query, feed_id=feed_id, feeds=available_feeds, articles=articles, page=page, total=total, page_size=PAGE_SIZE)
