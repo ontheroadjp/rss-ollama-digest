@@ -30,6 +30,21 @@ def test_search_pagination_and_escaping(client):
     assert "0 件の記事" in client.get("/?q=missing").text
 
 
+def test_run_stop_control_and_database_size(client):
+    client.get('/feeds')
+    with sqlite3.connect(browser.DB_PATH) as connection:
+        run_id = connection.execute("INSERT INTO runs(status) VALUES ('running')").lastrowid
+    page = client.get('/feeds')
+    assert 'class="stop-button"' in page.text
+    assert '中止' in page.text
+    assert 'DB容量:' in client.get('/feeds?tab=basic').text
+    client.post(f'/runs/{run_id}/stop')
+    with sqlite3.connect(browser.DB_PATH) as connection:
+        assert connection.execute('SELECT status FROM runs WHERE id = ?', (run_id,)).fetchone()[0] == 'stopping'
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO runs(status) VALUES ('queued')")
+
+
 def test_missing_database_is_not_created(tmp_path, monkeypatch):
     path = tmp_path / "missing.db"
     monkeypatch.setattr(browser, "DB_PATH", path)

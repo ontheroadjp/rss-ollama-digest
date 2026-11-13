@@ -15,6 +15,7 @@
   {% if error %}<p class="message" role="alert">{{ error }}</p>{% endif %}
   {% if tab == 'basic' %}
   <h2>基本設定</h2>
+  <p>DB容量: {{ '%.2f'|format(database_mb) }} MB</p>
   <form action="{{ url_for('update_timezone') }}" method="post" class="timezone-settings">
     <label for="timezone">タイムゾーン</label>
     <select id="timezone" name="timezone">{% for zone in timezones %}<option value="{{ zone }}" {% if zone == selected_timezone %}selected{% endif %}>{{ zone }}</option>{% endfor %}</select>
@@ -42,8 +43,8 @@
   </div>
   {% else %}<p class="message">フィードは登録されていません。</p>{% endfor %}
   <h2>記事の取得と要約</h2>
-  <form action="{{ url_for('start_run') }}" method="post"><button id="run-button" type="submit" {% if run and run[1] in ('queued', 'running') %}disabled{% endif %}>すぐに実行</button></form>
-  {% if run %}<p id="run-status" role="status" data-active="{{ 'true' if run[1] in ('queued', 'running') else 'false' }}">{% if run[1] == 'queued' %}開始待ち{% elif run[1] == 'running' %}実行中{% elif run[1] == 'completed' %}完了{% else %}エラー{% endif %} {{ run[2] }}</p>
+  <form id="run-form" action="{{ url_for('stop_run', run_id=run[0]) if run and run[1] in ('queued', 'running', 'stopping') else url_for('start_run') }}" method="post"><button id="run-button" type="submit" {% if run and run[1] in ('queued', 'running', 'stopping') %}class="stop-button"{% endif %} {% if run and run[1] == 'stopping' %}disabled{% endif %}>{{ '中止中' if run and run[1] == 'stopping' else '中止' if run and run[1] in ('queued', 'running') else 'すぐに実行' }}</button></form>
+  {% if run %}<p id="run-status" role="status" data-active="{{ 'true' if run[1] in ('queued', 'running', 'stopping') else 'false' }}">{% if run[1] == 'queued' %}開始待ち{% elif run[1] == 'running' %}実行中{% elif run[1] == 'stopping' %}中止中{% elif run[1] == 'stopped' %}中止{% elif run[1] == 'completed' %}完了{% else %}エラー{% endif %} {{ run[2] }}</p>
   <h3>実行ログ</h3><pre id="run-log" class="run-log">{% for (line,) in logs %}{{ line }}
 {% else %}ログはまだありません。{% endfor %}</pre>{% endif %}
   <script>
@@ -59,12 +60,17 @@
           const page = new DOMParser().parseFromString(await response.text(), 'text/html');
           const nextLog = page.getElementById('run-log');
           const nextStatus = page.getElementById('run-status');
+          const nextForm = page.getElementById('run-form');
+          const nextButton = page.getElementById('run-button');
           if (nextLog && nextStatus) {
             log.textContent = nextLog.textContent;
             log.scrollTop = log.scrollHeight;
             status.textContent = nextStatus.textContent;
             status.dataset.active = nextStatus.dataset.active;
-            button.disabled = nextStatus.dataset.active === 'true';
+            document.getElementById('run-form').action = nextForm.action;
+            button.disabled = nextButton.disabled;
+            button.className = nextButton.className;
+            button.textContent = nextButton.textContent;
           }
         } catch (error) {
           console.error('実行状況を更新できませんでした', error);

@@ -28,6 +28,7 @@
         <div class="meta"><span>{{ article.published_at or '公開日時なし' }}</span><span>{{ article.model }}</span></div>
         <h2>{% if article.safe_url %}<a href="{{ article.safe_url }}" target="_blank" rel="noopener noreferrer">{{ article.title }} ↗</a>{% else %}{{ article.title }}{% endif %}</h2>
         <p class="feed-name">{{ article.source_title or 'フィード不明' }}</p>
+        {% if article.tags %}<p class="tags">{% for tag in article.tags %}<span>{{ tag }}</span> {% endfor %}</p>{% endif %}
         <p class="summary">{{ article.summary }}</p>
         <p class="saved">保存日時 {{ article.created_at }}</p>
       </article>
