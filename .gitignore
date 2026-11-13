@@ -7,3 +7,7 @@
 .codex/hooks.json
 CLAUDE.md
 AGENTS.md
+/summaries.db
+/summaries.db-*
+__pycache__/
+.pytest_cache/

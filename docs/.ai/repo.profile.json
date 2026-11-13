@@ -7,7 +7,9 @@
     "docs/L3_implementation"
   ],
   "commands": {
-    "run": "python summarize.py"
+    "run": "python summarize.py",
+    "web": "docker compose -f frontend/compose.yaml up --build",
+    "web_stop": "docker compose -f frontend/compose.yaml down"
   },
   "primary_docs": {
     "investigation": "docs/L3_implementation/specification_summary.md",

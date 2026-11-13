@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>記事の要約</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main>
+    <header><p class="eyebrow">RSS OLLAMA DIGEST</p><h1>記事の要約</h1><p>保存されたニュースを、まとめて確認。</p></header>
+    <form action="/" method="get" role="search">
+      <label class="sr-only" for="q">タイトルや要約を検索</label>
+      <input id="q" name="q" value="{{ query }}" placeholder="タイトルや要約を検索">
+      <button type="submit">検索</button>
+    </form>
+    {% if error %}
+      <p class="message" role="alert">データベースを読み込めません。summaries.db とアクセス権を確認してください。</p>
+    {% else %}
+      <p class="count">{{ total }} 件の記事{% if query %} · 「{{ query }}」の検索結果{% endif %}</p>
+      {% for article in articles %}
+      <article>
+        <div class="meta"><span>{{ article.published_at or '公開日時なし' }}</span><span>{{ article.model }}</span></div>
+        <h2>{% if article.safe_url %}<a href="{{ article.safe_url }}" target="_blank" rel="noopener noreferrer">{{ article.title }} ↗</a>{% else %}{{ article.title }}{% endif %}</h2>
+        <p class="summary">{{ article.summary }}</p>
+        <p class="saved">保存日時 {{ article.created_at }}</p>
+      </article>
+      {% else %}<p class="message">{% if total %}このページに記事はありません。{% elif query %}一致する記事はありません。{% else %}記事はまだ保存されていません。{% endif %}</p>{% endfor %}
+      <nav aria-label="ページ移動">
+        {% if page > 1 %}<a href="{{ url_for('index', q=query, page=page-1) }}">← 前へ</a>{% endif %}
+        <span>{{ page }} ページ</span>
+        {% if page * page_size < total %}<a href="{{ url_for('index', q=query, page=page+1) }}">次へ →</a>{% endif %}
+      </nav>
+    {% endif %}
+  </main>
+</body>
+</html>

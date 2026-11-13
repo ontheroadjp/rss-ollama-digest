@@ -6,6 +6,7 @@ RSS の記事本文を取得し、ローカルの Ollama で日本語に要約�
 
 - RSS の記事を取得し、本文の抽出と要約を行います。処理済み URL は通常スキップします（`summarize.py:216-285`）。
 - 任意の webhook への通知に対応します（`summarize.py:180-187,294-299`）。
+- Docker で保存済み記事の一覧・検索をブラウザから利用できます。
 
 ## Installation
 
@@ -14,6 +15,10 @@ Python と `feedparser`、`requests`、`trafilatura` が必要です（`summariz
 ## Usage
 
 `python summarize.py` で実行します。`-n` で処理件数を指定でき、既定値は 5 です。`--ignore-history` は既存レコードを再要約して上書きします（`summarize.py:190-205,211-214,276-284`）。
+
+閲覧画面は Docker Compose を使って `docker compose -f frontend/compose.yaml up --build` で起動し、同じPCでは <http://localhost:8000> を開きます。同じLAN内のスマートフォンからは、実行PCのIPアドレスを使って `http://<PCのIPアドレス>:8000` にアクセスします。IPアドレスは Linux なら `hostname -I` で確認できます。ファイアウォールが有効な場合はポート 8000 への接続を許可してください。
+
+この画面には認証がなく、ポート 8000 に接続できる相手は保存済みの記事を閲覧できます。信頼できるネットワークで使用してください。リポジトリ直下の `summaries.db` を読み取り専用で参照します。終了するには `docker compose -f frontend/compose.yaml down` を実行します。DB がない場合は先に `python summarize.py` を実行してください。
 
 ## Design Principles
 
