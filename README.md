@@ -1,30 +1,33 @@
 # RSS Ollama Digest
 
-RSS の記事本文を取得し、ローカルの Ollama で日本語に要約して SQLite に保存します（`summarize.py:190-310`）。
+RSS の記事本文を取得し、Ollama で日本語に要約して SQLite に保存します（`summarize.py:185-324`）。
 
 ## Features
 
-- RSS の記事を取得し、本文の抽出と要約を行います。処理済み URL は通常スキップします（`summarize.py:216-285`）。
-- 任意の webhook への通知に対応します（`summarize.py:180-187,294-299`）。
-- Docker で保存済み記事の一覧・検索をブラウザから利用できます。
+- フィードの登録・検証・タイトル変更・削除と、フィードごとの取得数設定（`frontend/app.py:43-107`）。
+- 登録済みフィードの記事取得と要約、Web からの即時実行と進捗表示（`summarize.py:215-324`、`frontend/templates/feeds.html`）。
+- 記事一覧の検索、フィード選択、投稿日時順とページ送り（`frontend/app.py:129-166`）。
+- 任意の webhook 通知（`summarize.py:175-182`）。
 
 ## Installation
 
-Python と `feedparser`、`requests`、`trafilatura` が必要です（`summarize.py:1-11`）。依存関係の固定ファイルは未確認です。Ollama の API とモデル `qwen3.5:4b` を利用できるようにしてください（`summarize.py:15-16,148-150`）。
+Python と `frontend/requirements.txt` の依存関係、pytest（テスト用）、利用可能な Ollama と `qwen3.5:4b` が必要です（`frontend/requirements.txt`、`summarize.py:16-17`）。Docker を利用する場合は依存関係がイメージにインストールされます（`frontend/Dockerfile`）。
 
 ## Usage
 
-`python summarize.py` で実行します。`-n` で処理件数を指定でき、既定値は 5 です。`--ignore-history` は既存レコードを再要約して上書きします（`summarize.py:190-205,211-214,276-284`）。
+Linux で `docker compose -f frontend/compose.yaml up --build` を実行し、`http://localhost:8000` を開きます。フィード登録ページで URL を追加し、「すぐに実行」を押します。新規 DB にはフィードがありません。停止は `docker compose -f frontend/compose.yaml down` です。Compose はホストネットワークを使い、ホストの Ollama に接続します（`frontend/compose.yaml:1-14`）。
 
-閲覧画面は Docker Compose を使って `docker compose -f frontend/compose.yaml up --build` で起動し、同じPCでは <http://localhost:8000> を開きます。同じLAN内のスマートフォンからは、実行PCのIPアドレスを使って `http://<PCのIPアドレス>:8000` にアクセスします。IPアドレスは Linux なら `hostname -I` で確認できます。ファイアウォールが有効な場合はポート 8000 への接続を許可してください。
+CLI では `python summarize.py` を実行します。`-n 5` はフィードごとの取得数を今回の実行に限り上書きし、省略時は各フィードの設定（既定は無制限）を使います。`--ignore-history` は保存済み記事も再要約します（`summarize.py:189-200,231-257`）。
 
-この画面には認証がなく、ポート 8000 に接続できる相手は保存済みの記事を閲覧できます。信頼できるネットワークで使用してください。リポジトリ直下の `summaries.db` を読み取り専用で参照します。終了するには `docker compose -f frontend/compose.yaml down` を実行します。DB がない場合は先に `python summarize.py` を実行してください。
+テストは pytest と依存関係を用意し、`PYTHONPATH=.:frontend python -m pytest -q frontend/tests` を実行します（`frontend/tests/`）。
+
+Web 画面には認証がありません。接続できる人はフィードの変更と要約の実行ができます。信頼できるネットワークで使用してください（`frontend/app.py:60-127`）。
 
 ## Design Principles
 
-- URL を一意に保存し、通常は記事のダウンロード前に処理済みか確認します（`summarize.py:35-38,240-243`）。
-- モデルへの入力は本文の先頭 4000 文字に制限します。コード内の説明では CPU での処理速度とのバランスを目的としています（`summarize.py:17,84-96`）。
+- 記事 URL を一意に保存し、通常は本文のダウンロード前に処理済みか確認します（`database.py:8-11`、`summarize.py:39-42,255-259`）。
+- モデルへの入力は本文の先頭 4000 文字に制限します。コードは CPU 処理速度とのバランスを理由に挙げています（`summarize.py:18,75-76`）。
 
 ## Configuration
 
-RSS URL、Ollama URL、モデル名、通知先は `summarize.py:13-21` の定数で設定します。通知先が空の場合、通知は送信されません（`summarize.py:180-182`）。
+フィード URL と取得数は Web 画面で管理します。`DATABASE_PATH` と `OLLAMA_URL` は環境変数で設定できます。モデル名と webhook の通知先は `summarize.py` の定数で設定します。通知先が空の場合は送信しません（`summarize.py:16-22,175-182`）。

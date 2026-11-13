@@ -1,3 +1,3 @@
-# 記事一覧テンプレート
+# frontend/templates/index.html
 
-検索フォーム、記事のタイトル・要約・日時・モデル、元記事へのリンクとページ移動を表示する。DB エラーや検索結果がない場合は案内を表示する（`frontend/templates/index.html:1-37`）。Flask のテンプレートに渡される値を利用する。
+記事一覧、検索、フィード絞り込み、投稿日時順のページ移動、記事のフィード名を表示する（`frontend/templates/index.html`）。
