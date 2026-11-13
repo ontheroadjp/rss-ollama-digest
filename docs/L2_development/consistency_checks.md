@@ -1,5 +1,5 @@
 # 整合性確認
 
-`summarize.py` の定数、CLI 引数、テーブル定義、処理順序を README と L1・L3 の記述に照合します（`summarize.py:13-21,30-47,190-205,216-299`）。`docs/.ai/repo.profile.json` のコマンドと文書を相互に確認します。
+`database.py` のテーブル定義、`summarize.py` の CLI とフィード処理、`frontend/app.py` のエンドポイントを README と L1・L3 に照合します。`docs/.ai/repo.profile.json` のコマンドと文書を相互に確認します。
 
-閲覧画面の検索、ページ送り、DB 不在とリンクの扱いは `frontend/tests/test_app.py` で検証します。CI の定義は未確認です。
+Web と要約処理は `frontend/tests/` のテストで検証します。実際の RSS、ホスト Ollama、Docker 接続は実環境で確認が必要です（`frontend/compose.yaml`、`summarize.py:140`）。CI の定義は確認されていません。

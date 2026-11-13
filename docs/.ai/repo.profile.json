@@ -9,7 +9,8 @@
   "commands": {
     "run": "python summarize.py",
     "web": "docker compose -f frontend/compose.yaml up --build",
-    "web_stop": "docker compose -f frontend/compose.yaml down"
+    "web_stop": "docker compose -f frontend/compose.yaml down",
+    "test": "PYTHONPATH=.:frontend python -m pytest -q frontend/tests"
   },
   "primary_docs": {
     "investigation": "docs/L3_implementation/specification_summary.md",

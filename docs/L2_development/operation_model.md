@@ -1,5 +1,7 @@
 # 運用モデル
 
-`python summarize.py` が CLI の実行方法です（`summarize.py:190-205,309-310`）。既定では最大 5 件を処理し、`--ignore-history` は既存 URL の保存内容を上書きします（`summarize.py:194-204,276-284`）。RSS と記事の取得、Ollama API への接続が必要です（`summarize.py:14-16,148-150,216-217,248-250`）。
+`python summarize.py` は登録済みフィードを処理します。`-n` は各フィードの設定を一時的に上書きし、`--ignore-history` は既存記事を再要約します（`summarize.py:185-200,231-257`）。新規 DB のフィードは空です（`database.py:18-23`）。
 
-閲覧画面は `docker compose -f frontend/compose.yaml up --build` で起動し、`docker compose -f frontend/compose.yaml down` で停止します。ポート 8000 を公開し、DB を読み取り専用で参照します（`frontend/compose.yaml:1-10`、`frontend/app.py:25-29`）。認証はありません。CI の定義は未確認です。
+Web 画面は `docker compose -f frontend/compose.yaml up --build` で起動し、`docker compose -f frontend/compose.yaml down` で停止します。Linux のホストネットワークを使って Ollama と接続し、DB に書き込みます（`frontend/compose.yaml:1-14`）。認証はありません（`frontend/app.py:60-127`）。
+
+テストは `PYTHONPATH=.:frontend python -m pytest -q frontend/tests` です（`frontend/tests/`）。CI 定義は確認されていません。
