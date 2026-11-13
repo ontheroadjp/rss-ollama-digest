@@ -3,12 +3,25 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RSS フィードの登録</title>
+  <title>管理画面</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body><main>
-  <header><a class="header-link" href="{{ url_for('index') }}">記事一覧へ</a><p class="eyebrow">RSS OLLAMA DIGEST</p><h1>RSS フィードの登録</h1><p>取得するフィードを管理します。</p></header>
+  <header><a class="header-link" href="{{ url_for('index') }}">記事一覧へ</a><p class="eyebrow">RSS OLLAMA DIGEST</p><h1>管理画面</h1><p>表示とフィードを管理します。</p></header>
+  <nav class="settings-tabs" aria-label="管理画面の設定">
+    <a href="{{ url_for('feeds', tab='basic') }}" {% if tab == 'basic' %}aria-current="page"{% endif %}>基本設定</a>
+    <a href="{{ url_for('feeds') }}" {% if tab == 'feeds' %}aria-current="page"{% endif %}>フィード設定</a>
+  </nav>
   {% if error %}<p class="message" role="alert">{{ error }}</p>{% endif %}
+  {% if tab == 'basic' %}
+  <h2>基本設定</h2>
+  <form action="{{ url_for('update_timezone') }}" method="post" class="timezone-settings">
+    <label for="timezone">タイムゾーン</label>
+    <select id="timezone" name="timezone">{% for zone in timezones %}<option value="{{ zone }}" {% if zone == selected_timezone %}selected{% endif %}>{{ zone }}</option>{% endfor %}</select>
+    <button type="submit">保存</button>
+  </form>
+  {% else %}
+  <h2>RSS フィードの登録</h2>
   <form action="{{ url_for('add_feed') }}" method="post">
     <label class="sr-only" for="url">RSS フィード URL</label>
     <input id="url" name="url" type="url" placeholder="https://example.com/feed.xml" required>
@@ -61,4 +74,5 @@
       if (status.dataset.active === 'true') setTimeout(refresh, 5000);
     }
   </script>
+  {% endif %}
 </main></body></html>

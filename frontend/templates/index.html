@@ -8,7 +8,7 @@
 </head>
 <body>
   <main>
-    <header><a class="header-link" href="{{ url_for('feeds') }}">RSS フィードの登録</a><p class="eyebrow">RSS OLLAMA DIGEST</p><h1>記事の要約</h1><p>保存されたニュースを、まとめて確認。</p></header>
+    <header><a class="header-link" href="{{ url_for('feeds') }}">管理画面</a><p class="eyebrow">RSS OLLAMA DIGEST</p><h1>記事の要約</h1><p>保存されたニュースを、まとめて確認。</p></header>
     <form action="/" method="get" role="search">
       <label class="sr-only" for="q">タイトルや要約を検索</label>
       <input id="q" name="q" value="{{ query }}" placeholder="タイトルや要約を検索">

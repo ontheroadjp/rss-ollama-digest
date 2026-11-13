@@ -45,7 +45,7 @@ def test_unsafe_links_are_not_rendered(client, monkeypatch):
 
 
 def test_feed_registration_deletion_and_validation(client, monkeypatch):
-    assert 'RSS フィードの登録' in client.get('/').text
+    assert '管理画面' in client.get('/').text
     assert 'フィードは登録されていません' in client.get('/feeds').text
     assert '入力してください' in client.post('/feeds', data={'url': 'file:///etc/passwd'}, follow_redirects=True).text
     monkeypatch.setattr(browser.requests, 'get', lambda *args, **kwargs: FakeResponse(b'<?xml version="1.0"?><rss version="2.0"><channel><title>Example feed</title><link>https://example.com</link><description>News</description></channel></rss>'))
@@ -162,6 +162,24 @@ def test_article_order_uses_publication_time_and_shows_feed(client):
     text = client.get('/').text
     assert text.index('記事 2 ↗') < text.index('記事 1 ↗') < text.index('記事 22 ↗')
     assert 'Feed &amp; News' in text
+    assert '2026/11/13 13:00:00 JST' in text
+    assert 'invalid date' in text
+
+
+def test_timezone_setting_changes_display_without_changing_stored_rss_date(client):
+    basic = client.get('/feeds?tab=basic').text
+    assert '基本設定' in basic
+    assert 'value="Asia/Tokyo" selected' in basic
+    with sqlite3.connect(browser.DB_PATH) as connection:
+        connection.execute("UPDATE articles SET published_at = 'Fri, 13 Nov 2026 08:40:24 GMT' WHERE id = 22")
+    assert '2026/11/13 17:40:24 JST' in client.get('/').text
+    client.post('/settings/timezone', data={'timezone': 'America/New_York'})
+    assert '2026/11/13 03:40:24 EST' in client.get('/').text
+    assert 'value="America/New_York" selected' in client.get('/feeds?tab=basic').text
+    assert '有効なタイムゾーン' in client.post('/settings/timezone', data={'timezone': '../invalid'}, follow_redirects=True).text
+    with sqlite3.connect(browser.DB_PATH) as connection:
+        assert connection.execute('SELECT published_at FROM articles WHERE id = 22').fetchone()[0] == 'Fri, 13 Nov 2026 08:40:24 GMT'
+        assert connection.execute("SELECT value FROM settings WHERE key = 'timezone'").fetchone()[0] == 'America/New_York'
 
 
 def test_feed_name_falls_back_after_deletion(client):

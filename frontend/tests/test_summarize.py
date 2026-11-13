@@ -18,6 +18,15 @@ def test_existing_database_migrates_once(tmp_path):
         assert connection.execute('SELECT COUNT(*) FROM feeds').fetchone()[0] == 0
 
 
+def test_saved_article_has_utc_timestamp_and_preserves_publication_date(tmp_path):
+    with init_db(tmp_path / 'articles.db') as connection:
+        published = 'Fri, 13 Nov 2026 08:40:24 GMT'
+        summarize.save_article_to_db(connection, 'article', 'Title', 'Summary', 'model', published, 'feed', 'Feed')
+        saved, created = connection.execute('SELECT published_at, created_at FROM articles').fetchone()
+        assert saved == published
+        assert created.endswith('+00:00')
+
+
 def test_multiple_feeds_have_independent_limits(tmp_path, monkeypatch):
     path = tmp_path / 'articles.db'
     with init_db(path) as connection:
