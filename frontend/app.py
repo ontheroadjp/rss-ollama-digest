@@ -1,5 +1,4 @@
 import logging
-import json
 import os
 import sqlite3
 import subprocess
@@ -12,7 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 import feedparser
 import requests
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 from database import init_db
 
@@ -171,6 +170,10 @@ def stop_run(run_id: int):
 def index() -> tuple[str, int] | str:
     query = request.args.get("q", "").strip()
     feed_id = request.args.get("feed", "").strip()
+    tag_id = request.args.get("tag", "").strip()
+    status = request.args.get("status", "0")
+    if status not in ("all", "0", "1", "2", "3"):
+        status = "0"
     page = max(request.args.get("page", 1, type=int), 1)
     pattern = f"%{query.replace('!', '!!').replace('%', '!%').replace('_', '!_')}%"
     try:
@@ -188,11 +191,22 @@ def index() -> tuple[str, int] | str:
             if feed_id:
                 condition += " AND a.feed_url = (SELECT url FROM feeds WHERE CAST(id AS TEXT) = ?)"
                 params.append(feed_id)
+            if status != "all":
+                condition += " AND a.is_read = ?"
+                params.append(int(status))
+            tags = connection.execute(
+                f"""SELECT t.id, t.name, COUNT(*) AS count FROM tags t
+                    JOIN article_tags at ON at.tag_id = t.id JOIN articles a ON a.id = at.article_id
+                    WHERE {condition} GROUP BY t.id ORDER BY count DESC, t.name COLLATE NOCASE, t.id""", params
+            ).fetchall()
+            if tag_id:
+                condition += " AND EXISTS (SELECT 1 FROM article_tags at WHERE at.article_id = a.id AND CAST(at.tag_id AS TEXT) = ?)"
+                params.append(tag_id)
             total = connection.execute(
                 f"SELECT COUNT(*) FROM articles a WHERE {condition}", params
             ).fetchone()[0]
             rows = connection.execute(
-                f"""SELECT a.title, a.url, a.summary, a.model, a.published_at, a.created_at, a.tags,
+                f"""SELECT a.id, a.is_read, a.title, a.url, a.summary, a.model, a.published_at, a.created_at,
                            COALESCE(NULLIF(f.title, ''), a.feed_title, a.feed_url) AS source_title
                     FROM articles a LEFT JOIN feeds f ON f.url = a.feed_url
                     WHERE {condition}
@@ -200,9 +214,26 @@ def index() -> tuple[str, int] | str:
                     LIMIT ? OFFSET ?""",
                 [*params, PAGE_SIZE, (page - 1) * PAGE_SIZE],
             ).fetchall()
+            article_tags = {}
+            for row in rows:
+                article_tags[row['id']] = connection.execute(
+                    "SELECT t.id, t.name FROM tags t JOIN article_tags at ON at.tag_id = t.id WHERE at.article_id = ? ORDER BY t.name", (row['id'],)
+                ).fetchall()
     except sqlite3.Error:
         logging.exception("Could not read article database")
-        return render_template("index.html", error=True, query=query, feed_id=feed_id, feeds=[], articles=[], page=page, total=0, page_size=PAGE_SIZE), 503
+        return render_template("index.html", error=True, query=query, feed_id=feed_id, tag_id=tag_id, status=status, tags=[], feeds=[], articles=[], page=page, total=0, page_size=PAGE_SIZE), 503
 
-    articles = [{**dict(row), "tags": json.loads(row["tags"] or "[]"), "safe_url": safe_url(row["url"]), "published_at": display_timestamp(row["published_at"], zone), "created_at": display_timestamp(row["created_at"], zone)} for row in rows]
-    return render_template("index.html", error=False, query=query, feed_id=feed_id, feeds=available_feeds, articles=articles, page=page, total=total, page_size=PAGE_SIZE)
+    articles = [{**dict(row), "tags": article_tags[row["id"]], "safe_url": safe_url(row["url"]), "published_at": display_timestamp(row["published_at"], zone), "created_at": display_timestamp(row["created_at"], zone)} for row in rows]
+    return render_template("index.html", error=False, query=query, feed_id=feed_id, tag_id=tag_id, status=status, tags=tags, feeds=available_feeds, articles=articles, page=page, total=total, page_size=PAGE_SIZE)
+
+
+@app.post("/articles/<int:article_id>/read")
+def update_read_status(article_id: int):
+    status = request.form.get('is_read', '')
+    if status not in ('1', '2', '3'):
+        return jsonify(ok=False), 400
+    with init_db(DB_PATH) as connection:
+        cursor = connection.execute("UPDATE articles SET is_read = ? WHERE id = ?", (int(status), article_id))
+    if request.headers.get('Accept') == 'application/json':
+        return jsonify(ok=cursor.rowcount == 1), 200 if cursor.rowcount == 1 else 404
+    return redirect(url_for('index', q=request.form.get('q', ''), feed=request.form.get('feed', ''), tag=request.form.get('tag', ''), status=request.form.get('status', '0'), page=request.form.get('page', 1)))

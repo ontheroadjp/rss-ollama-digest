@@ -219,3 +219,44 @@ def test_filter_by_feed_combines_with_search_and_pagination(client):
     assert '記事 1 ↗' in client.get(f'/?feed={feed_id}&q=100%25&page=2').text
     assert '0 件の記事' in client.get(f'/?feed={feed_id}&q=missing').text
     assert '22 件の記事' in client.get('/').text
+
+
+def test_read_status_and_tag_filter(client):
+    client.get('/')
+    with sqlite3.connect(browser.DB_PATH) as connection:
+        connection.executemany('INSERT INTO tags(name) VALUES (?)', [('頻出',), ('少数',)])
+        connection.executemany('INSERT INTO article_tags VALUES (?, ?)', [(22, 1), (21, 1), (22, 2)])
+    page = client.get('/').text
+    assert page.index('頻出 (2)') < page.index('少数 (1)')
+    assert '>興味あり</button>' in page
+    assert '>興味なし</button>' in page
+    assert '>既読</button>' in page
+    assert '>未読</option>' in page
+    assert "fetch(form.action" in page
+    assert 'setTimeout(updateResults, 350)' in page
+    assert "if (tag) tag.remove()" in page
+    assert '2 件の記事' in client.get('/?tag=1').text
+    client.post('/articles/22/read', data={'is_read': '1'})
+    assert '記事 22 ↗' not in client.get('/').text
+    read_page = client.get('/?status=all&tag=1').text
+    assert '記事 22 ↗' in read_page
+    assert 'aria-pressed="true">興味なし</button>' in read_page
+    assert client.post('/articles/22/read', data={'is_read': '2'}, headers={'Accept': 'application/json'}).json == {'ok': True}
+    assert '記事 22 ↗' in client.get('/?status=2').text
+    assert '記事 22 ↗' not in client.get('/?status=1').text
+    assert client.post('/articles/22/read', data={'is_read': '3'}, headers={'Accept': 'application/json'}).json == {'ok': True}
+    assert '記事 22 ↗' in client.get('/?status=3').text
+    assert '記事 22 ↗' not in client.get('/?status=2').text
+    assert client.post('/articles/22/read', data={'is_read': '0'}, headers={'Accept': 'application/json'}).status_code == 400
+    assert client.post('/articles/999/read', data={'is_read': '1'}, headers={'Accept': 'application/json'}).status_code == 404
+
+
+def test_legacy_tags_migrate_once(client):
+    with sqlite3.connect(browser.DB_PATH) as connection:
+        connection.execute('ALTER TABLE articles ADD COLUMN tags TEXT')
+        connection.execute('UPDATE articles SET tags = ? WHERE id = 22', ('["共通", "共通", "技術"]',))
+    assert client.get('/').status_code == 200
+    assert client.get('/').status_code == 200
+    with sqlite3.connect(browser.DB_PATH) as connection:
+        assert 'tags' not in [row[1] for row in connection.execute('PRAGMA table_info(articles)')]
+        assert connection.execute('SELECT COUNT(*) FROM article_tags').fetchone()[0] == 2
