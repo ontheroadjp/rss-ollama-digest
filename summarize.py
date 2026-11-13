@@ -238,7 +238,7 @@ def main():
     conn = init_db(DB_PATH)
     try:
         if args.run_id is not None:
-            conn.execute("UPDATE runs SET status = 'running' WHERE id = ? AND status = 'queued'", (args.run_id,))
+            conn.execute("UPDATE runs SET status = 'running', started_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'queued'", (args.run_id,))
             conn.commit()
         if args.ignore_history:
             log("[INFO] Test mode: Will overwrite existing records in DB.")
@@ -369,7 +369,7 @@ def main():
         if args.run_id is not None:
             status = "stopped" if stop_requested(conn) else ("failed" if errors else "completed")
             message = f"{processed_count} 件の記事を要約しました。" + " ".join(errors)
-            conn.execute("UPDATE runs SET status = CASE WHEN status = 'stopping' THEN 'stopped' ELSE ? END, message = ? WHERE id = ?", (status, message, args.run_id))
+            conn.execute("UPDATE runs SET status = CASE WHEN status = 'stopping' THEN 'stopped' ELSE ? END, message = ?, processed_count = ?, fetched_count = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?", (status, message, processed_count, total_entries, args.run_id))
             conn.commit()
     except Exception as exc:
         if args.run_id is not None:

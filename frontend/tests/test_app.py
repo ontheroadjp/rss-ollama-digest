@@ -31,10 +31,10 @@ def test_search_pagination_and_escaping(client):
 
 
 def test_run_stop_control_and_database_size(client):
-    client.get('/feeds')
+    client.get('/feeds?tab=feeds')
     with sqlite3.connect(browser.DB_PATH) as connection:
         run_id = connection.execute("INSERT INTO runs(status) VALUES ('running')").lastrowid
-    page = client.get('/feeds')
+    page = client.get('/feeds?tab=feeds')
     assert 'class="stop-button"' in page.text
     assert '中止' in page.text
     assert 'DB容量:' in client.get('/feeds?tab=basic').text
@@ -61,7 +61,7 @@ def test_unsafe_links_are_not_rendered(client, monkeypatch):
 
 def test_feed_registration_deletion_and_validation(client, monkeypatch):
     assert '管理画面' in client.get('/').text
-    assert 'フィードは登録されていません' in client.get('/feeds').text
+    assert 'フィードは登録されていません' in client.get('/feeds?tab=feeds').text
     assert '入力してください' in client.post('/feeds', data={'url': 'file:///etc/passwd'}, follow_redirects=True).text
     monkeypatch.setattr(browser.requests, 'get', lambda *args, **kwargs: FakeResponse(b'<?xml version="1.0"?><rss version="2.0"><channel><title>Example feed</title><link>https://example.com</link><description>News</description></channel></rss>'))
     url = 'https://example.com/rss'
@@ -130,19 +130,19 @@ def test_run_prevents_duplicate_and_reports_start_failure(client, monkeypatch):
 
 
 def test_deleted_feed_is_not_recreated(client):
-    client.get('/feeds')
+    client.get('/feeds?tab=feeds')
     with sqlite3.connect(browser.DB_PATH) as connection:
         connection.execute("INSERT INTO feeds (url) VALUES ('https://example.com/rss')")
         connection.execute('DELETE FROM feeds')
-    assert 'フィードは登録されていません' in client.get('/feeds').text
+    assert 'フィードは登録されていません' in client.get('/feeds?tab=feeds').text
 
 
 def test_run_progress_is_escaped_and_displayed(client):
-    client.get('/feeds')
+    client.get('/feeds?tab=feeds')
     with sqlite3.connect(browser.DB_PATH) as connection:
         run_id = connection.execute("INSERT INTO runs (status) VALUES ('running')").lastrowid
         connection.execute('INSERT INTO run_logs (run_id, line) VALUES (?, ?)', (run_id, '<script>progress</script>'))
-    response = client.get('/feeds')
+    response = client.get('/feeds?tab=feeds')
     assert '実行ログ' in response.text
     assert '&lt;script&gt;progress&lt;/script&gt;' in response.text
     assert 'http-equiv="refresh"' not in response.text
@@ -151,7 +151,7 @@ def test_run_progress_is_escaped_and_displayed(client):
 
 
 def test_feed_settings_and_validation(client):
-    client.get('/feeds')
+    client.get('/feeds?tab=feeds')
     with sqlite3.connect(browser.DB_PATH) as connection:
         connection.execute("INSERT INTO feeds (url) VALUES ('https://example.com/rss')")
         feed_id = connection.execute('SELECT id FROM feeds').fetchone()[0]
@@ -167,7 +167,7 @@ def test_feed_settings_and_validation(client):
 
 
 def test_article_order_uses_publication_time_and_shows_feed(client):
-    client.get('/feeds')
+    client.get('/feeds?tab=feeds')
     with sqlite3.connect(browser.DB_PATH) as connection:
         connection.execute("INSERT INTO feeds (url, title) VALUES ('https://example.com/rss', 'Feed & News')")
         feed_url = connection.execute('SELECT url FROM feeds').fetchone()[0]
@@ -198,14 +198,14 @@ def test_timezone_setting_changes_display_without_changing_stored_rss_date(clien
 
 
 def test_feed_name_falls_back_after_deletion(client):
-    client.get('/feeds')
+    client.get('/feeds?tab=feeds')
     with sqlite3.connect(browser.DB_PATH) as connection:
         connection.execute("UPDATE articles SET feed_url = 'https://deleted.test/rss', feed_title = '旧フィード' WHERE id = 22")
     assert '旧フィード' in client.get('/').text
 
 
 def test_filter_by_feed_combines_with_search_and_pagination(client):
-    client.get('/feeds')
+    client.get('/feeds?tab=feeds')
     with sqlite3.connect(browser.DB_PATH) as connection:
         connection.execute("INSERT INTO feeds (url) VALUES ('https://example.com/rss')")
         feed_id, feed_url = connection.execute('SELECT id, url FROM feeds').fetchone()
@@ -260,3 +260,40 @@ def test_legacy_tags_migrate_once(client):
     with sqlite3.connect(browser.DB_PATH) as connection:
         assert 'tags' not in [row[1] for row in connection.execute('PRAGMA table_info(articles)')]
         assert connection.execute('SELECT COUNT(*) FROM article_tags').fetchone()[0] == 2
+
+
+def test_default_tab_schedule_and_last_success(client):
+    page = client.get('/feeds').text
+    assert '基本設定</a>' in page and 'RSS フィードの自動取得' in page
+    assert 'まだ正常に完了した取得はありません' in page
+    assert '次回の更新予定時刻: 自動取得は無効です' in page
+    assert 'RSS フィードの登録' in client.get('/feeds?tab=feeds').text
+    assert '取得間隔' in client.post('/settings/schedule', data={'mode': 'interval', 'interval': '0'}, follow_redirects=True).text
+    client.post('/settings/schedule', data={'mode': 'interval', 'interval': '30'})
+    with sqlite3.connect(browser.DB_PATH) as connection:
+        settings = dict(connection.execute('SELECT key, value FROM settings'))
+        assert settings['schedule_mode'] == 'interval' and settings['schedule_interval'] == '30'
+        assert browser.display_timestamp(settings['schedule_next'], browser.ZoneInfo('Asia/Tokyo')) in client.get('/feeds').text
+        connection.execute("INSERT INTO runs(status, finished_at) VALUES ('completed', '2026-11-13 08:40:24')")
+        connection.execute("INSERT INTO runs(status, finished_at) VALUES ('failed', '2026-11-14 08:40:24')")
+    assert '2026/11/13 17:40:24 JST' in client.get('/feeds').text
+    assert '有効な定時刻' in client.post('/settings/schedule', data={'mode': 'daily', 'daily_time': '99:00'}, follow_redirects=True).text
+    client.post('/settings/schedule', data={'mode': 'daily', 'daily_time': '09:30'})
+    assert 'value="09:30"' in client.get('/feeds').text
+    client.post('/settings/schedule', data={'mode': 'disabled'})
+    assert 'value="disabled" checked' in client.get('/feeds').text
+
+
+def test_schedule_history_shows_changes_and_automatic_runs(client):
+    client.post('/settings/schedule', data={'mode': 'daily', 'daily_time': '09:00'})
+    client.post('/settings/schedule', data={'mode': 'disabled'})
+    with sqlite3.connect(browser.DB_PATH) as connection:
+        connection.execute("INSERT INTO runs(status, origin, started_at, finished_at, processed_count, fetched_count, message) VALUES ('completed', 'automatic', '2026-11-13 00:00:00', '2026-11-13 00:05:00', 3, 10, '完了')")
+        connection.execute("INSERT INTO runs(status, origin, message) VALUES ('completed', 'manual', '手動のみ')")
+    page = client.get('/feeds').text
+    assert '自動取得が毎日 09:00（Asia/Tokyo）に設定されました。' in page
+    assert '自動取得が無効に設定されました。' in page
+    assert '2026/11/13 09:00:00 JST' in page
+    assert '自動取得: 完了' in page and '要約: 3 件' in page
+    assert 'フィードから取得: 10 件' in page
+    assert '手動のみ' not in page

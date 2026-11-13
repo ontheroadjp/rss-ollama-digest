@@ -10,11 +10,36 @@
   <header><a class="header-link" href="{{ url_for('index') }}">記事一覧へ</a><p class="eyebrow">RSS OLLAMA DIGEST</p><h1>管理画面</h1><p>表示とフィードを管理します。</p></header>
   <nav class="settings-tabs" aria-label="管理画面の設定">
     <a href="{{ url_for('feeds', tab='basic') }}" {% if tab == 'basic' %}aria-current="page"{% endif %}>基本設定</a>
-    <a href="{{ url_for('feeds') }}" {% if tab == 'feeds' %}aria-current="page"{% endif %}>フィード設定</a>
+    <a href="{{ url_for('feeds', tab='feeds') }}" {% if tab == 'feeds' %}aria-current="page"{% endif %}>フィード設定</a>
   </nav>
   {% if error %}<p class="message" role="alert">{{ error }}</p>{% endif %}
   {% if tab == 'basic' %}
   <h2>基本設定</h2>
+  <h3>RSS フィードの自動取得</h3>
+  <p>最終更新時刻: {{ last_updated or 'まだ正常に完了した取得はありません' }}</p>
+  <p>次回の更新予定時刻: {{ next_update or '自動取得は無効です' }}</p>
+  <form action="{{ url_for('update_schedule') }}" method="post">
+    <label><input type="radio" name="mode" value="disabled" {% if settings.get('schedule_mode', 'disabled') == 'disabled' %}checked{% endif %}> 無効</label>
+    <label><input type="radio" name="mode" value="interval" {% if settings.get('schedule_mode') == 'interval' %}checked{% endif %}> 時間間隔</label>
+    <label for="interval">取得間隔（分）</label><input id="interval" name="interval" type="number" min="1" max="10080" value="{{ settings.get('schedule_interval', '60') }}">
+    <label><input type="radio" name="mode" value="daily" {% if settings.get('schedule_mode') == 'daily' %}checked{% endif %}> 定時刻（毎日）</label>
+    <label for="daily-time">取得時刻</label><input id="daily-time" name="daily_time" type="time" value="{{ settings.get('schedule_time', '09:00') }}">
+    <button type="submit">保存</button>
+  </form>
+  <h3>自動取得の履歴</h3>
+  {% for entry in history %}
+  <div class="message">
+    <time>{{ entry.time }}</time>
+    {% if entry.kind == 'event' %}<span>{{ entry.message }}</span>
+    {% else %}
+    <span>自動取得: {% if entry.status == 'queued' %}開始待ち{% elif entry.status == 'running' %}実行中{% elif entry.status == 'stopping' %}中止中{% elif entry.status == 'stopped' %}中止{% elif entry.status == 'completed' %}完了{% else %}エラー{% endif %}</span>
+    {% if entry.fetched is not none %}<span>フィードから取得: {{ entry.fetched }} 件</span>{% endif %}
+    {% if entry.count is not none %}<span>要約: {{ entry.count }} 件</span>{% endif %}
+    {% if entry.finished %}<span>終了: {{ entry.finished }}</span>{% endif %}
+    {% if entry.message %}<span>{{ entry.message }}</span>{% endif %}
+    {% endif %}
+  </div>
+  {% else %}<p>履歴はまだありません。</p>{% endfor %}
   <p>DB容量: {{ '%.2f'|format(database_mb) }} MB</p>
   <form action="{{ url_for('update_timezone') }}" method="post" class="timezone-settings">
     <label for="timezone">タイムゾーン</label>
@@ -55,7 +80,7 @@
       log.scrollTop = log.scrollHeight;
       const refresh = async () => {
         try {
-          const response = await fetch({{ url_for('feeds')|tojson }}, { cache: 'no-store' });
+          const response = await fetch({{ url_for('feeds', tab='feeds')|tojson }}, { cache: 'no-store' });
           if (!response.ok) throw new Error('Failed to load run status');
           const page = new DOMParser().parseFromString(await response.text(), 'text/html');
           const nextLog = page.getElementById('run-log');

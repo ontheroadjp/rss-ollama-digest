@@ -13,3 +13,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+  scheduler:
+    extends:
+      service: frontend
+    command: ["python", "../scheduler.py"]
