@@ -6,5 +6,6 @@
 - `POST /feeds`: URL を取得・検証し、フィードタイトルと共に登録します（`frontend/app.py:61-75,101-119`）。
 - `POST /feeds/<id>/settings`、`POST /feeds/<id>/delete`: フィード設定または削除を行います（`frontend/app.py:122-138`）。
 - `POST /runs`: 非同期要約処理を開始し、重複実行を抑止します（`frontend/app.py:141-158`）。
+- `POST /runs/<id>/stop`: 実行中または開始待ちの処理に停止を要求します（`frontend/app.py:163-168`）。
 
 認証はありません。登録時の接続先は利用者が指定します（`frontend/app.py:101-119`）。

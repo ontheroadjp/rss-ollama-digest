@@ -5,10 +5,10 @@ RSS の記事本文を取得し、Ollama で日本語に要約して SQLite に�
 ## Features
 
 - フィードの登録・検証・タイトル変更・削除と、フィードごとの取得数設定（`frontend/app.py:43-107`）。
-- 登録済みフィードの記事取得と要約、Web からの即時実行と進捗表示（`summarize.py:215-324`、`frontend/templates/feeds.html`）。
+- 登録済みフィードの記事取得と要約、本文・最大3件のタグの保存、Web からの実行・中止と進捗表示（`summarize.py:264-337`、`frontend/templates/feeds.html:45-75`）。
 - 記事一覧の検索、フィード選択、投稿日時順とページ送り（`frontend/app.py:129-166`）。
 - 任意の webhook 通知（`summarize.py:175-182`）。
-- 管理画面の基本設定で表示タイムゾーンを選択できます。既定は日本時間です（`frontend/app.py:22-44,78-98`）。
+- 管理画面の基本設定で表示タイムゾーンを選択でき、DBファイル容量をMBで確認できます。タイムゾーンの既定は日本時間です（`frontend/app.py:23-45,80-99`）。
 
 ## Installation
 
@@ -26,7 +26,7 @@ Web 画面には認証がありません。接続できる人はフィードの�
 
 ## Design Principles
 
-- 記事 URL を一意に保存し、通常は本文のダウンロード前に処理済みか確認します（`database.py:8-11`、`summarize.py:39-42,255-259`）。
+- 記事 URL を一意に保存し、通常は本文のダウンロード前に URL または同一フィード内の GUID で処理済みか確認します（`database.py:8-11`、`summarize.py:39-42,284-286`）。
 - モデルへの入力は本文の先頭 4000 文字に制限します。コードは CPU 処理速度とのバランスを理由に挙げています（`summarize.py:18,75-76`）。
 
 ## Configuration
