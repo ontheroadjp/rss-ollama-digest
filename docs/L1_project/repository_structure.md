@@ -1,6 +1,7 @@
 # リポジトリ構造
 
 - `summarize.py`: CLI、フィード取得、要約、保存と通知（`summarize.py:175-324`）。
+- `scheduler.py`: SQLite の予定に基づく自動取得（`scheduler.py:19-63`）。
 - `database.py`: SQLite テーブルの初期化と列追加（`database.py:6-32`）。
 - `frontend/`: Flask アプリ、テンプレート、スタイル、Docker 設定とテスト（`frontend/app.py`、`frontend/Dockerfile`、`frontend/tests/`）。
 - `summaries.db`: 実行時の既定 DB。Git 管理外（`summarize.py:20-21`、`.gitignore`）。
