@@ -42,6 +42,18 @@ def init_db(path: str | Path) -> sqlite3.Connection:
     conn.execute("""CREATE TABLE IF NOT EXISTS runs (
         id INTEGER PRIMARY KEY, status TEXT NOT NULL, message TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+    run_columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+    if "finished_at" not in run_columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN finished_at TEXT")
+    if "origin" not in run_columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'")
+    if "started_at" not in run_columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN started_at TEXT")
+    if "processed_count" not in run_columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN processed_count INTEGER")
+    if "fetched_count" not in run_columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN fetched_count INTEGER")
+    conn.execute("CREATE TABLE IF NOT EXISTS schedule_events (id INTEGER PRIMARY KEY, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, message TEXT NOT NULL)")
     conn.execute("DROP INDEX IF EXISTS one_active_run")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_v2 ON runs ((1)) WHERE status IN ('queued', 'running', 'stopping')")
     conn.execute("""CREATE TABLE IF NOT EXISTS run_logs (

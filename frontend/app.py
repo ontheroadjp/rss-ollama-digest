@@ -14,6 +14,7 @@ import requests
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 from database import init_db
+from scheduler import next_occurrence
 
 app = Flask(__name__)
 PAGE_SIZE = 20
@@ -79,12 +80,51 @@ def fetch_feed_title(url: str) -> str:
 def feeds() -> str:
     with init_db(DB_PATH) as connection:
         feeds = connection.execute("SELECT id, url, title, article_limit FROM feeds ORDER BY id").fetchall()
-        run = connection.execute("SELECT id, status, message FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+        run = connection.execute("SELECT id, status, message, origin FROM runs ORDER BY id DESC LIMIT 1").fetchone()
         logs = connection.execute("SELECT line FROM run_logs WHERE run_id = ? ORDER BY id", (run[0],)).fetchall() if run else []
         selected_timezone = configured_timezone(connection)
         database_mb = DB_PATH.stat().st_size / 1_000_000
-    tab = "basic" if request.args.get("tab") == "basic" else "feeds"
-    return render_template("feeds.html", feeds=feeds, run=run, logs=logs, error=request.args.get("error"), tab=tab, selected_timezone=selected_timezone, timezones=sorted(available_timezones()), database_mb=database_mb)
+        settings = dict(connection.execute("SELECT key, value FROM settings"))
+        history_rows = connection.execute("""SELECT created_at, 'event', message, NULL, NULL, NULL, NULL FROM schedule_events
+            UNION ALL SELECT COALESCE(started_at, created_at), 'run', message, status, processed_count, finished_at, fetched_count FROM runs WHERE origin = 'automatic'
+            ORDER BY 1 DESC LIMIT 100""").fetchall()
+        zone = ZoneInfo(selected_timezone)
+        history = [{"time": display_timestamp(row[0], zone), "kind": row[1], "message": row[2], "status": row[3], "count": row[4], "finished": display_timestamp(row[5], zone), "fetched": row[6]} for row in history_rows]
+        last_run = connection.execute("SELECT MAX(finished_at) FROM runs WHERE status = 'completed'").fetchone()[0]
+        last_updated = display_timestamp(last_run, ZoneInfo(selected_timezone)) if last_run else None
+        next_update = display_timestamp(settings.get("schedule_next"), ZoneInfo(selected_timezone)) if settings.get("schedule_mode", "disabled") != "disabled" else None
+    tab = "feeds" if request.args.get("tab") == "feeds" else "basic"
+    return render_template("feeds.html", feeds=feeds, run=run, logs=logs, error=request.args.get("error"), tab=tab, selected_timezone=selected_timezone, timezones=sorted(available_timezones()), database_mb=database_mb, settings=settings, last_updated=last_updated, next_update=next_update, history=history)
+
+
+@app.post("/settings/schedule")
+def update_schedule():
+    mode = request.form.get("mode", "")
+    interval = request.form.get("interval", "").strip()
+    daily_time = request.form.get("daily_time", "").strip()
+    if mode not in ("disabled", "interval", "daily") or (mode == "interval" and (not interval.isascii() or not interval.isdecimal() or len(interval) > 5 or not 1 <= int(interval) <= 10080)):
+        return redirect(url_for("feeds", error="取得間隔は 1〜10080 分で指定してください。"))
+    try:
+        if mode == "daily":
+            datetime.strptime(daily_time, "%H:%M")
+            if len(daily_time) != 5:
+                raise ValueError("Invalid time")
+    except ValueError:
+        return redirect(url_for("feeds", error="有効な定時刻を指定してください。"))
+    with init_db(DB_PATH) as connection:
+        zone = configured_timezone(connection)
+        values = {"schedule_mode": mode, "schedule_interval": interval if mode == "interval" else "60", "schedule_time": daily_time if mode == "daily" else "09:00"}
+        if mode != "disabled":
+            values["schedule_next"] = next_occurrence(mode, values["schedule_interval"], values["schedule_time"], zone, datetime.now(timezone.utc)).isoformat()
+        connection.executemany("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", values.items())
+        if mode == "disabled":
+            message = "自動取得が無効に設定されました。"
+        elif mode == "interval":
+            message = f"自動取得が {interval} 分間隔に設定されました。"
+        else:
+            message = f"自動取得が毎日 {daily_time}（{zone}）に設定されました。"
+        connection.execute("INSERT INTO schedule_events (message) VALUES (?)", (message,))
+    return redirect(url_for("feeds"))
 
 
 @app.post("/settings/timezone")
@@ -96,6 +136,10 @@ def update_timezone():
         return redirect(url_for("feeds", tab="basic", error="有効なタイムゾーンを選択してください。"))
     with init_db(DB_PATH) as connection:
         connection.execute("INSERT INTO settings (key, value) VALUES ('timezone', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (selected_timezone,))
+        settings = dict(connection.execute("SELECT key, value FROM settings"))
+        if settings.get("schedule_mode") == "daily":
+            next_run = next_occurrence("daily", "60", settings.get("schedule_time", "09:00"), selected_timezone, datetime.now(timezone.utc))
+            connection.execute("UPDATE settings SET value = ? WHERE key = 'schedule_next'", (next_run.isoformat(),))
     return redirect(url_for("feeds", tab="basic"))
 
 
@@ -103,28 +147,28 @@ def update_timezone():
 def add_feed():
     url = request.form.get("url", "").strip()
     if not safe_url(url):
-        return redirect(url_for("feeds", error="HTTP または HTTPS の URL を入力してください。"))
+        return redirect(url_for("feeds", tab="feeds", error="HTTP または HTTPS の URL を入力してください。"))
     with init_db(DB_PATH) as connection:
         if connection.execute("SELECT 1 FROM feeds WHERE url = ?", (url,)).fetchone():
-            return redirect(url_for("feeds", error="この URL は登録済みです。"))
+            return redirect(url_for("feeds", tab="feeds", error="この URL は登録済みです。"))
     try:
         title = fetch_feed_title(url)
     except (requests.RequestException, ValueError) as exc:
         logging.warning("Failed to retrieve RSS feed %s: %s", url, exc)
-        return redirect(url_for("feeds", error="フィードを取得または解析できません。URL とフィードを確認してください。"))
+        return redirect(url_for("feeds", tab="feeds", error="フィードを取得または解析できません。URL とフィードを確認してください。"))
     try:
         with init_db(DB_PATH) as connection:
             connection.execute("INSERT INTO feeds (url, title) VALUES (?, ?)", (url, title))
     except sqlite3.IntegrityError:
-        return redirect(url_for("feeds", error="この URL は登録済みです。"))
-    return redirect(url_for("feeds"))
+        return redirect(url_for("feeds", tab="feeds", error="この URL は登録済みです。"))
+    return redirect(url_for("feeds", tab="feeds"))
 
 
 @app.post("/feeds/<int:feed_id>/delete")
 def delete_feed(feed_id: int):
     with init_db(DB_PATH) as connection:
         connection.execute("DELETE FROM feeds WHERE id = ?", (feed_id,))
-    return redirect(url_for("feeds"))
+    return redirect(url_for("feeds", tab="feeds"))
 
 
 @app.post("/feeds/<int:feed_id>/settings")
@@ -132,11 +176,11 @@ def update_feed(feed_id: int):
     title = request.form.get("title", "").strip()
     raw_limit = request.form.get("article_limit", "").strip()
     if raw_limit and (not raw_limit.isascii() or not raw_limit.isdecimal() or not 1 <= int(raw_limit) <= 2147483647):
-        return redirect(url_for("feeds", error="取得数には 1 以上の整数を入力してください。"))
+        return redirect(url_for("feeds", tab="feeds", error="取得数には 1 以上の整数を入力してください。"))
     limit = int(raw_limit) if raw_limit else None
     with init_db(DB_PATH) as connection:
         connection.execute("UPDATE feeds SET title = ?, article_limit = ? WHERE id = ?", (title, limit, feed_id))
-    return redirect(url_for("feeds"))
+    return redirect(url_for("feeds", tab="feeds"))
 
 
 @app.post("/runs")
@@ -146,7 +190,7 @@ def start_run():
             cursor = connection.execute("INSERT INTO runs (status) VALUES ('queued')")
             run_id = cursor.lastrowid
     except sqlite3.IntegrityError:
-        return redirect(url_for("feeds", error="既に実行中です。"))
+        return redirect(url_for("feeds", tab="feeds", error="既に実行中です。"))
     try:
         subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve().parent.parent / "summarize.py"), "--run-id", str(run_id)],
@@ -156,14 +200,14 @@ def start_run():
     except OSError as exc:
         with init_db(DB_PATH) as connection:
             connection.execute("UPDATE runs SET status = 'failed', message = ? WHERE id = ?", (str(exc), run_id))
-    return redirect(url_for("feeds"))
+    return redirect(url_for("feeds", tab="feeds"))
 
 
 @app.post("/runs/<int:run_id>/stop")
 def stop_run(run_id: int):
     with init_db(DB_PATH) as connection:
         connection.execute("UPDATE runs SET status = 'stopping' WHERE id = ? AND status IN ('queued', 'running')", (run_id,))
-    return redirect(url_for("feeds"))
+    return redirect(url_for("feeds", tab="feeds"))
 
 
 @app.get("/")
