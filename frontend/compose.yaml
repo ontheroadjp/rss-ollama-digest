@@ -1,0 +1,10 @@
+services:
+  frontend:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ..:/data:ro
+    read_only: true
+    tmpfs:
+      - /tmp
