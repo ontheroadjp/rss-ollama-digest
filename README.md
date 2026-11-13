@@ -8,6 +8,7 @@ RSS の記事本文を取得し、Ollama で日本語に要約して SQLite に�
 - 登録済みフィードの記事取得と要約、Web からの即時実行と進捗表示（`summarize.py:215-324`、`frontend/templates/feeds.html`）。
 - 記事一覧の検索、フィード選択、投稿日時順とページ送り（`frontend/app.py:129-166`）。
 - 任意の webhook 通知（`summarize.py:175-182`）。
+- 管理画面の基本設定で表示タイムゾーンを選択できます。既定は日本時間です（`frontend/app.py:22-44,78-98`）。
 
 ## Installation
 
@@ -30,4 +31,4 @@ Web 画面には認証がありません。接続できる人はフィードの�
 
 ## Configuration
 
-フィード URL と取得数は Web 画面で管理します。`DATABASE_PATH` と `OLLAMA_URL` は環境変数で設定できます。モデル名と webhook の通知先は `summarize.py` の定数で設定します。通知先が空の場合は送信しません（`summarize.py:16-22,175-182`）。
+フィード URL と取得数、表示タイムゾーンは管理画面で設定します。RSS の公開日時は元の値を保持して表示時に変換します。タイムゾーン情報のない既存日時は UTC として扱います（`frontend/app.py:25-44`）。`DATABASE_PATH` と `OLLAMA_URL` は環境変数で設定できます。モデル名と webhook の通知先は `summarize.py` の定数で設定します。通知先が空の場合は送信しません（`summarize.py:16-22,175-182`）。
