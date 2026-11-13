@@ -44,7 +44,7 @@ def is_already_processed(conn, url):
 
 def save_article_to_db(conn, url, title, summary, model, published_at, feed_url, feed_title, overwrite=False):
     """Insert or update a single summarized article and commit immediately."""
-    created_at = datetime.datetime.now().isoformat(timespec="seconds")
+    created_at = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     if overwrite:
         conn.execute(
             """

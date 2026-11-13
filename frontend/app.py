@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 import feedparser
 import requests
@@ -18,6 +19,29 @@ app = Flask(__name__)
 PAGE_SIZE = 20
 DB_PATH = Path(os.environ.get("DATABASE_PATH", "/data/summaries.db"))
 MAX_FEED_BYTES = 5 * 1024 * 1024
+DEFAULT_TIMEZONE = "Asia/Tokyo"
+
+
+def parse_timestamp(value: str) -> datetime:
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def display_timestamp(value: str | None, zone: ZoneInfo) -> str:
+    if not value:
+        return ""
+    try:
+        return parse_timestamp(value).astimezone(zone).strftime("%Y/%m/%d %H:%M:%S %Z")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return value
+
+
+def configured_timezone(connection: sqlite3.Connection) -> str:
+    row = connection.execute("SELECT value FROM settings WHERE key = 'timezone'").fetchone()
+    return row[0] if row else DEFAULT_TIMEZONE
 
 
 def safe_url(value: str) -> str | None:
@@ -29,13 +53,7 @@ def publication_timestamp(value: str | None) -> float | None:
     if not value:
         return None
     try:
-        try:
-            parsed = parsedate_to_datetime(value)
-        except (TypeError, ValueError, OverflowError):
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.timestamp()
+        return parse_timestamp(value).timestamp()
     except (TypeError, ValueError, OverflowError, OSError):
         return None
 
@@ -63,7 +81,21 @@ def feeds() -> str:
         feeds = connection.execute("SELECT id, url, title, article_limit FROM feeds ORDER BY id").fetchall()
         run = connection.execute("SELECT id, status, message FROM runs ORDER BY id DESC LIMIT 1").fetchone()
         logs = connection.execute("SELECT line FROM run_logs WHERE run_id = ? ORDER BY id", (run[0],)).fetchall() if run else []
-    return render_template("feeds.html", feeds=feeds, run=run, logs=logs, error=request.args.get("error"))
+        selected_timezone = configured_timezone(connection)
+    tab = "basic" if request.args.get("tab") == "basic" else "feeds"
+    return render_template("feeds.html", feeds=feeds, run=run, logs=logs, error=request.args.get("error"), tab=tab, selected_timezone=selected_timezone, timezones=sorted(available_timezones()))
+
+
+@app.post("/settings/timezone")
+def update_timezone():
+    selected_timezone = request.form.get("timezone", "")
+    try:
+        ZoneInfo(selected_timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        return redirect(url_for("feeds", tab="basic", error="有効なタイムゾーンを選択してください。"))
+    with init_db(DB_PATH) as connection:
+        connection.execute("INSERT INTO settings (key, value) VALUES ('timezone', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (selected_timezone,))
+    return redirect(url_for("feeds", tab="basic"))
 
 
 @app.post("/feeds")
@@ -140,6 +172,7 @@ def index() -> tuple[str, int] | str:
         with sqlite3.connect(uri, uri=True) as connection:
             connection.row_factory = sqlite3.Row
             connection.create_function("publication_timestamp", 1, publication_timestamp, deterministic=True)
+            zone = ZoneInfo(configured_timezone(connection))
             available_feeds = connection.execute("SELECT id, url, title FROM feeds ORDER BY id").fetchall()
             condition = "(a.title LIKE ? ESCAPE '!' OR a.summary LIKE ? ESCAPE '!')"
             params: list[str | int] = [pattern, pattern]
@@ -162,5 +195,5 @@ def index() -> tuple[str, int] | str:
         logging.exception("Could not read article database")
         return render_template("index.html", error=True, query=query, feed_id=feed_id, feeds=[], articles=[], page=page, total=0, page_size=PAGE_SIZE), 503
 
-    articles = [{**dict(row), "safe_url": safe_url(row["url"])} for row in rows]
+    articles = [{**dict(row), "safe_url": safe_url(row["url"]), "published_at": display_timestamp(row["published_at"], zone), "created_at": display_timestamp(row["created_at"], zone)} for row in rows]
     return render_template("index.html", error=False, query=query, feed_id=feed_id, feeds=available_feeds, articles=articles, page=page, total=total, page_size=PAGE_SIZE)

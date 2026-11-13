@@ -16,6 +16,7 @@ def init_db(path: str | Path) -> sqlite3.Connection:
     if "feed_title" not in article_columns:
         conn.execute("ALTER TABLE articles ADD COLUMN feed_title TEXT")
     conn.execute("CREATE TABLE IF NOT EXISTS feeds (id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE)")
+    conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(feeds)")}
     if "title" not in columns:
         conn.execute("ALTER TABLE feeds ADD COLUMN title TEXT NOT NULL DEFAULT ''")

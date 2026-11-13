@@ -33,4 +33,9 @@ h2 a:hover { text-decoration: underline; }
 .summary { white-space: pre-wrap; line-height: 1.8; }
 .saved { font-size: .78rem; margin-bottom: 0; }
 nav { display: flex; justify-content: center; gap: 24px; margin: 32px 0; }
+.settings-tabs { justify-content: flex-start; border-bottom: 1px solid #c8d6cc; }
+.settings-tabs a { padding: 12px 4px; text-decoration: none; }
+.settings-tabs a[aria-current="page"] { border-bottom: 3px solid #245b49; font-weight: 700; }
+.timezone-settings { align-items: center; flex-wrap: wrap; }
+.timezone-settings select { max-width: 100%; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
