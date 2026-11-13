@@ -1,10 +1,15 @@
 services:
   frontend:
-    build: .
-    ports:
-      - "8000:8000"
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+    network_mode: host
     volumes:
-      - ..:/data:ro
+      - ..:/data
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      DATABASE_PATH: /data/summaries.db
+      OLLAMA_URL: ${OLLAMA_URL:-http://127.0.0.1:11434/api/generate}
     read_only: true
     tmpfs:
       - /tmp

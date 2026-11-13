@@ -10,41 +10,30 @@ import feedparser
 import requests
 import trafilatura
 
+from database import init_db
+
 # --- Default Configuration ---
-RSS_URL = "https://news.yahoo.co.jp/rss/topics/top-picks.xml"  # Target site RSS feed URL
-OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
 MODEL_NAME = "qwen3.5:4b"
 MAX_TEXT_CHARS = 4000  # Balanced length for fast CPU prefill on T480s
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "summaries.db")
+DB_PATH = os.environ.get("DATABASE_PATH", os.path.join(BASE_DIR, "summaries.db"))
 WEBHOOK_URL = ""
+RUN_ID: int | None = None
 
 
 def log(msg):
     """Print timestamped message immediately without buffering."""
     now = datetime.datetime.now().strftime("%H:%M:%S")
-    print(f"[{now}] {msg}", flush=True)
-
-
-def init_db(db_path):
-    """Initialize SQLite database and create articles table if it does not exist."""
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS articles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            url TEXT NOT NULL UNIQUE,
-            title TEXT NOT NULL,
-            summary TEXT NOT NULL,
-            model TEXT NOT NULL,
-            published_at TEXT,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    conn.commit()
-    return conn
+    line = f"[{now}] {msg}"
+    print(line, flush=True)
+    if RUN_ID is not None:
+        try:
+            with sqlite3.connect(DB_PATH, timeout=30) as connection:
+                connection.execute("INSERT INTO run_logs (run_id, line) VALUES (?, ?)", (RUN_ID, line))
+        except sqlite3.Error as exc:
+            print(f"[WARN] Could not save progress: {exc}", file=sys.stderr, flush=True)
 
 
 def is_already_processed(conn, url):
@@ -53,30 +42,32 @@ def is_already_processed(conn, url):
     return cur.fetchone() is not None
 
 
-def save_article_to_db(conn, url, title, summary, model, published_at, overwrite=False):
+def save_article_to_db(conn, url, title, summary, model, published_at, feed_url, feed_title, overwrite=False):
     """Insert or update a single summarized article and commit immediately."""
     created_at = datetime.datetime.now().isoformat(timespec="seconds")
     if overwrite:
         conn.execute(
             """
-            INSERT INTO articles (url, title, summary, model, published_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO articles (url, title, summary, model, published_at, created_at, feed_url, feed_title)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(url) DO UPDATE SET
                 title = excluded.title,
                 summary = excluded.summary,
                 model = excluded.model,
                 published_at = excluded.published_at,
-                created_at = excluded.created_at
+                created_at = excluded.created_at,
+                feed_url = excluded.feed_url,
+                feed_title = excluded.feed_title
             """,
-            (url, title, summary, model, published_at, created_at),
+            (url, title, summary, model, published_at, created_at, feed_url, feed_title),
         )
     else:
         conn.execute(
             """
-            INSERT OR IGNORE INTO articles (url, title, summary, model, published_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO articles (url, title, summary, model, published_at, created_at, feed_url, feed_title)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (url, title, summary, model, published_at, created_at),
+            (url, title, summary, model, published_at, created_at, feed_url, feed_title),
         )
     conn.commit()
 
@@ -148,6 +139,7 @@ def summarize_text(title, text):
     try:
         with requests.post(OLLAMA_URL, json=payload, stream=True, timeout=300) as res:
             res.raise_for_status()
+            last_progress = time.perf_counter()
             for line in res.iter_lines():
                 if not line:
                     continue
@@ -159,6 +151,9 @@ def summarize_text(title, text):
                         full_response.append(token_text)
                     with lock:
                         state["tokens"] += 1
+                    if RUN_ID is not None and time.perf_counter() - last_progress >= 5:
+                        log(f"  Generating summary: {state['tokens']} tokens ({time.perf_counter() - start_time:.1f}s)")
+                        last_progress = time.perf_counter()
 
                 if chunk.get("done"):
                     break
@@ -194,43 +189,66 @@ def main():
     parser.add_argument(
         "-n", "--limit",
         type=int,
-        default=5,
-        help="Maximum number of latest articles to process (default: 5)"
+        default=None,
+        help="Override the configured maximum number of articles per feed"
     )
     parser.add_argument(
         "--ignore-history",
         action="store_true",
         help="Ignore existing DB records and re-summarize latest articles (for testing)"
     )
+    parser.add_argument("--run-id", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    global RUN_ID
+    RUN_ID = args.run_id
 
     script_start = time.perf_counter()
-    log(f"=== Process started (Max articles: {args.limit} | Model: {MODEL_NAME}) ===")
+    limit_label = str(args.limit) if args.limit is not None else "feed settings"
+    log(f"=== Process started (Max articles per feed: {limit_label} | Model: {MODEL_NAME}) ===")
     log(f"[INFO] Database: {DB_PATH}")
 
     conn = init_db(DB_PATH)
     try:
+        if args.run_id is not None:
+            conn.execute("UPDATE runs SET status = 'running' WHERE id = ?", (args.run_id,))
+            conn.commit()
         if args.ignore_history:
             log("[INFO] Test mode: Will overwrite existing records in DB.")
 
-        log(f"1/4 Fetching RSS feed: {RSS_URL}")
-        feed = feedparser.parse(RSS_URL)
-        total_entries = len(feed.entries)
-        log(f"-> RSS feed fetched (Total entries found: {total_entries})")
-
-        if total_entries == 0:
-            log("[WARN] No entries found. Please check RSS_URL.")
-            return
+        feeds = conn.execute("SELECT id, url, title, article_limit FROM feeds ORDER BY id").fetchall()
+        entries = []
+        errors = []
+        for feed_id, feed_url, title, configured_limit in feeds:
+            log(f"1/4 Fetching RSS feed: {feed_url}")
+            feed = feedparser.parse(feed_url)
+            feed_title = feed.feed.get("title", "").strip()
+            if not title and feed_title:
+                conn.execute("UPDATE feeds SET title = ? WHERE id = ? AND title = ''", (feed_title, feed_id))
+                conn.commit()
+            if feed.get("bozo"):
+                log(f"[WARN] Feed could not be parsed: {feed_url}: {feed.get('bozo_exception')}")
+                errors.append(f"フィードの取得に失敗しました: {feed_url}")
+            feed_limit = args.limit if args.limit is not None else configured_limit
+            entries.extend((feed_url, title or feed_title or feed_url, feed_limit, entry) for entry in feed.entries)
+        total_entries = len(entries)
+        log(f"-> RSS feeds fetched (Total entries found: {total_entries})")
 
         summaries_for_notify = []
         processed_count = 0
+        feed_counts: dict[str, int] = {}
+        limited_feeds: set[str] = set()
 
-        for idx, entry in enumerate(feed.entries, start=1):
-            if processed_count >= args.limit:
-                log(f"[INFO] Reached limit ({args.limit} articles). Stopping loop.")
-                break
-
+        for idx, (feed_url, feed_title, feed_limit, entry) in enumerate(entries, start=1):
             url = entry.get("link")
+            if url:
+                conn.execute("UPDATE articles SET feed_url = ?, feed_title = ? WHERE url = ? AND feed_url IS NULL", (feed_url, feed_title, url))
+                conn.commit()
+            if feed_limit is not None and feed_counts.get(feed_url, 0) >= feed_limit:
+                if feed_url not in limited_feeds:
+                    log(f"[INFO] Reached limit ({feed_limit} articles) for {feed_url}.")
+                    limited_feeds.add(feed_url)
+                continue
+
             title = entry.get("title", "Untitled")
             published_at = entry.get("published", "")
 
@@ -242,8 +260,9 @@ def main():
                 log(f"[SKIP] Already in DB ({idx}/{total_entries}): {title}")
                 continue
 
-            current_num = processed_count + 1
-            log(f"--- [{current_num}/{args.limit}] Processing: {title} ---")
+            current_num = feed_counts.get(feed_url, 0) + 1
+            limit_label = str(feed_limit) if feed_limit is not None else "unlimited"
+            log(f"--- [{current_num}/{limit_label}] Feed: {feed_url} | Processing: {title} ---")
 
             # Step 2: Download HTML
             log("2/4 Downloading article page...")
@@ -280,16 +299,20 @@ def main():
                     summary=summary,
                     model=MODEL_NAME,
                     published_at=published_at,
+                    feed_url=feed_url,
+                    feed_title=feed_title,
                     overwrite=args.ignore_history,
                 )
                 log(f"-> Saved to SQLite (DB: {os.path.basename(DB_PATH)})")
 
                 summaries_for_notify.append(f"## {title}\nURL: {url}\n\n{summary}\n\n---\n")
                 processed_count += 1
+                feed_counts[feed_url] = current_num
             except Exception as e:
                 if sys.stdout.isatty():
                     print()
                 log(f"-> [ERROR] Ollama summarization failed ({url}): {e}")
+                errors.append(f"要約に失敗しました: {url}: {e}")
 
         if summaries_for_notify:
             today_str = datetime.date.today().strftime("%Y-%m-%d")
@@ -302,6 +325,16 @@ def main():
 
         total_elapsed = time.perf_counter() - script_start
         log(f"=== All tasks finished (Processed: {processed_count} | Total time: {total_elapsed:.1f}s) ===")
+        if args.run_id is not None:
+            status = "failed" if errors else "completed"
+            message = f"{processed_count} 件の記事を要約しました。" + " ".join(errors)
+            conn.execute("UPDATE runs SET status = ?, message = ? WHERE id = ?", (status, message, args.run_id))
+            conn.commit()
+    except Exception as exc:
+        if args.run_id is not None:
+            conn.execute("UPDATE runs SET status = 'failed', message = ? WHERE id = ?", (str(exc), args.run_id))
+            conn.commit()
+        raise
     finally:
         conn.close()
 

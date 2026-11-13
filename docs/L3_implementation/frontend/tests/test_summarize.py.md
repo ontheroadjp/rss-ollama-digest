@@ -1,0 +1,3 @@
+# frontend/tests/test_summarize.py
+
+一時 SQLite DB と模擬 RSS を使用し、DB 移行、取得数、出典、既存記事の対応付けと実行ログを検証する（`frontend/tests/test_summarize.py`）。

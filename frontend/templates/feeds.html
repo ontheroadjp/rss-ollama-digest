@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RSS フィードの登録</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body><main>
+  <header><a class="header-link" href="{{ url_for('index') }}">記事一覧へ</a><p class="eyebrow">RSS OLLAMA DIGEST</p><h1>RSS フィードの登録</h1><p>取得するフィードを管理します。</p></header>
+  {% if error %}<p class="message" role="alert">{{ error }}</p>{% endif %}
+  <form action="{{ url_for('add_feed') }}" method="post">
+    <label class="sr-only" for="url">RSS フィード URL</label>
+    <input id="url" name="url" type="url" placeholder="https://example.com/feed.xml" required>
+    <button type="submit">登録</button>
+  </form>
+  <h2>登録済みフィード</h2>
+  {% for id, url, title, article_limit in feeds %}
+  <div class="feed-row">
+    <div class="feed-details">
+      <strong>{{ title or url }}</strong><span class="feed-url">{{ url }}</span>
+      <form class="feed-settings" action="{{ url_for('update_feed', feed_id=id) }}" method="post">
+        <label for="title-{{ id }}">タイトル</label><input id="title-{{ id }}" name="title" value="{{ title }}" placeholder="フィードから自動取得">
+        <label for="limit-{{ id }}">取得数</label><input id="limit-{{ id }}" name="article_limit" type="number" min="1" max="2147483647" value="{{ article_limit if article_limit is not none else '' }}" placeholder="無制限">
+        <button type="submit">保存</button>
+      </form>
+    </div>
+    <form action="{{ url_for('delete_feed', feed_id=id) }}" method="post"><button type="submit">削除</button></form>
+  </div>
+  {% else %}<p class="message">フィードは登録されていません。</p>{% endfor %}
+  <h2>記事の取得と要約</h2>
+  <form action="{{ url_for('start_run') }}" method="post"><button id="run-button" type="submit" {% if run and run[1] in ('queued', 'running') %}disabled{% endif %}>すぐに実行</button></form>
+  {% if run %}<p id="run-status" role="status" data-active="{{ 'true' if run[1] in ('queued', 'running') else 'false' }}">{% if run[1] == 'queued' %}開始待ち{% elif run[1] == 'running' %}実行中{% elif run[1] == 'completed' %}完了{% else %}エラー{% endif %} {{ run[2] }}</p>
+  <h3>実行ログ</h3><pre id="run-log" class="run-log">{% for (line,) in logs %}{{ line }}
+{% else %}ログはまだありません。{% endfor %}</pre>{% endif %}
+  <script>
+    const log = document.getElementById('run-log');
+    const status = document.getElementById('run-status');
+    const button = document.getElementById('run-button');
+    if (log && status) {
+      log.scrollTop = log.scrollHeight;
+      const refresh = async () => {
+        try {
+          const response = await fetch({{ url_for('feeds')|tojson }}, { cache: 'no-store' });
+          if (!response.ok) throw new Error('Failed to load run status');
+          const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+          const nextLog = page.getElementById('run-log');
+          const nextStatus = page.getElementById('run-status');
+          if (nextLog && nextStatus) {
+            log.textContent = nextLog.textContent;
+            log.scrollTop = log.scrollHeight;
+            status.textContent = nextStatus.textContent;
+            status.dataset.active = nextStatus.dataset.active;
+            button.disabled = nextStatus.dataset.active === 'true';
+          }
+        } catch (error) {
+          console.error('実行状況を更新できませんでした', error);
+        }
+        if (status.dataset.active === 'true') setTimeout(refresh, 5000);
+      };
+      if (status.dataset.active === 'true') setTimeout(refresh, 5000);
+    }
+  </script>
+</main></body></html>
